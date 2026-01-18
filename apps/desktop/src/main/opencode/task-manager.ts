@@ -629,6 +629,31 @@ export class TaskManager {
   }
 
   /**
+   * Respond to an OpenCode question (from question.asked SSE event)
+   * This forwards to the server adapter which calls the OpenCode API
+   */
+  async respondToOpenCodeQuestion(
+    taskId: string,
+    questionId: string,
+    response: { selectedOptions?: string[]; customText?: string; denied?: boolean }
+  ): Promise<boolean> {
+    const managedTask = this.activeTasks.get(taskId);
+    if (!managedTask) {
+      console.warn(`[TaskManager] Task ${taskId} not found for OpenCode question response`);
+      return false;
+    }
+
+    // Check if the adapter supports OpenCode questions (server adapter does)
+    if ('respondToOpenCodeQuestion' in managedTask.adapter) {
+      return await (managedTask.adapter as { respondToOpenCodeQuestion: (id: string, resp: typeof response) => Promise<boolean> })
+        .respondToOpenCodeQuestion(questionId, response);
+    }
+
+    console.warn(`[TaskManager] Adapter for task ${taskId} does not support OpenCode questions`);
+    return false;
+  }
+
+  /**
    * Get the session ID for a specific task
    */
   getSessionId(taskId: string): string | null {

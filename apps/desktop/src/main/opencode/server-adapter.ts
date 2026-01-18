@@ -914,6 +914,9 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
     }
   }
 
+  // Track pending OpenCode questions (que_...) that need API response
+  private pendingOpenCodeQuestions: Set<string> = new Set();
+
   /**
    * Handle question.asked SSE event
    * This is emitted when OpenCode uses the AskUserQuestion tool
@@ -937,6 +940,9 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
       return;
     }
 
+    // Track this as a pending OpenCode question
+    this.pendingOpenCodeQuestions.add(questionId);
+
     const question = questions[0];
     const permissionRequest: PermissionRequest = {
       id: questionId,
@@ -954,6 +960,74 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
 
     console.log('[OpenCode Server] Emitting permission-request for question');
     this.emit('permission-request', permissionRequest);
+  }
+
+  /**
+   * Check if a request ID is an OpenCode question (from question.asked SSE event)
+   */
+  isOpenCodeQuestion(requestId: string): boolean {
+    return this.pendingOpenCodeQuestions.has(requestId);
+  }
+
+  /**
+   * Respond to an OpenCode question via the API
+   * Uses POST /session/:id/permissions/:permissionID
+   */
+  async respondToOpenCodeQuestion(
+    questionId: string,
+    response: { selectedOptions?: string[]; customText?: string; denied?: boolean }
+  ): Promise<boolean> {
+    if (!this.serverPort || !this.currentSessionId) {
+      console.error('[OpenCode Server] Cannot respond to question - no server/session');
+      return false;
+    }
+
+    if (!this.pendingOpenCodeQuestions.has(questionId)) {
+      console.warn('[OpenCode Server] Question not found in pending:', questionId);
+      return false;
+    }
+
+    try {
+      // Build response for OpenCode's permission API
+      // The response format depends on the question type
+      let responseValue: string;
+      if (response.denied) {
+        responseValue = 'deny';
+      } else if (response.selectedOptions && response.selectedOptions.length > 0) {
+        responseValue = response.selectedOptions.join(', ');
+      } else if (response.customText) {
+        responseValue = response.customText;
+      } else {
+        responseValue = 'allow';
+      }
+
+      console.log('[OpenCode Server] Responding to question:', questionId, 'with:', responseValue);
+      this.emit('debug', { type: 'info', message: `Responding to question: ${responseValue}` });
+
+      const apiResponse = await fetch(
+        `http://localhost:${this.serverPort}/session/${this.currentSessionId}/permissions/${questionId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ response: responseValue }),
+        }
+      );
+
+      if (!apiResponse.ok) {
+        console.error('[OpenCode Server] Failed to respond to question:', apiResponse.status);
+        this.emit('debug', { type: 'error', message: `Question response failed: ${apiResponse.status}` });
+        return false;
+      }
+
+      this.pendingOpenCodeQuestions.delete(questionId);
+      console.log('[OpenCode Server] Question response sent successfully');
+      this.emit('debug', { type: 'info', message: 'Question response sent' });
+      return true;
+    } catch (error) {
+      console.error('[OpenCode Server] Error responding to question:', error);
+      this.emit('debug', { type: 'error', message: `Question response error: ${(error as Error).message}` });
+      return false;
+    }
   }
 
   // Track which messages are from the assistant (vs user)
@@ -1363,6 +1437,7 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
     this.streamingMessageId = null;
     this.streamingText = '';
     this.assistantMessageIds.clear();
+    this.pendingOpenCodeQuestions.clear();
 
     this.removeAllListeners();
     console.log('[OpenCode Server] Adapter disposed (shared server kept alive for session continuity)');

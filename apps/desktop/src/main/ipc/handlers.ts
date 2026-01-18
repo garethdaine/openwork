@@ -552,6 +552,23 @@ export function registerIPCHandlers(): void {
       console.warn(`[IPC] Question request ${requestId} not found in pending requests`);
     }
 
+    // Check if this is an OpenCode question (from question.asked SSE event)
+    // These have IDs like "que_..." and need to be responded via the OpenCode API
+    if (requestId && requestId.startsWith('que_')) {
+      console.log(`[IPC] OpenCode question response for ${requestId}`);
+      const denied = decision === 'deny';
+      const responded = await taskManager.respondToOpenCodeQuestion(taskId, requestId, {
+        selectedOptions: parsedResponse.selectedOptions,
+        customText: parsedResponse.customText,
+        denied,
+      });
+      if (responded) {
+        console.log(`[IPC] OpenCode question ${requestId} responded: ${denied ? 'denied' : 'answered'}`);
+        return;
+      }
+      console.warn(`[IPC] Failed to respond to OpenCode question ${requestId}`);
+    }
+
     // Check if the task is still active
     if (!taskManager.hasActiveTask(taskId)) {
       console.warn(`[IPC] Permission response for inactive task ${taskId}`);
