@@ -333,6 +333,12 @@ export function registerIPCHandlers(): void {
         const taskMessage = toTaskMessage(message);
         if (!taskMessage) return;
 
+        // Skip assistant text messages - these are handled by onTextDelta for streaming
+        // to avoid duplicate messages (one from streaming, one from message event)
+        if (message.type === 'text' && taskMessage.type === 'assistant') {
+          return;
+        }
+
         // Queue message for batching instead of immediate send
         queueMessage(taskId, taskMessage, forwardToRenderer, addTaskMessage);
       },
@@ -343,6 +349,19 @@ export function registerIPCHandlers(): void {
           taskId,
           ...delta,
         });
+
+        // When streaming completes, save the final message to task history
+        // This ensures persistence without duplicating the message in the UI
+        // (the UI already has it from the streaming updates)
+        if (delta.isComplete && delta.content) {
+          const finalMessage: TaskMessage = {
+            id: delta.messageId,
+            type: 'assistant',
+            content: delta.content,
+            timestamp: new Date().toISOString(),
+          };
+          addTaskMessage(taskId, finalMessage);
+        }
       },
 
       onProgress: (progress: { stage: string; message?: string }) => {
@@ -587,6 +606,12 @@ export function registerIPCHandlers(): void {
         const taskMessage = toTaskMessage(message);
         if (!taskMessage) return;
 
+        // Skip assistant text messages - these are handled by onTextDelta for streaming
+        // to avoid duplicate messages (one from streaming, one from message event)
+        if (message.type === 'text' && taskMessage.type === 'assistant') {
+          return;
+        }
+
         // Queue message for batching instead of immediate send
         queueMessage(taskId, taskMessage, forwardToRenderer, addTaskMessage);
       },
@@ -597,6 +622,19 @@ export function registerIPCHandlers(): void {
           taskId,
           ...delta,
         });
+
+        // When streaming completes, save the final message to task history
+        // This ensures persistence without duplicating the message in the UI
+        // (the UI already has it from the streaming updates)
+        if (delta.isComplete && delta.content) {
+          const finalMessage: TaskMessage = {
+            id: delta.messageId,
+            type: 'assistant',
+            content: delta.content,
+            timestamp: new Date().toISOString(),
+          };
+          addTaskMessage(taskId, finalMessage);
+        }
       },
 
       onProgress: (progress: { stage: string; message?: string }) => {
