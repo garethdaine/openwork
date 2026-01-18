@@ -857,11 +857,14 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
           // We need to await this before completing to ensure all content is retrieved
           if (!this.streamingText && this.currentSessionId) {
             console.log('[OpenCode Server] No streaming content received, fetching from session...');
+            console.log('[OpenCode Server] About to call fetchFinalMessageContent - serverPort:', this.serverPort, 'sessionId:', this.currentSessionId);
             this.emit('debug', { type: 'info', message: 'No streaming content - fetching from session' });
             // Use IIFE to handle async operation in sync handler
-            void (async () => {
+            const fetchPromise = (async () => {
               try {
+                console.log('[OpenCode Server] IIFE started, calling fetchFinalMessageContent...');
                 await this.fetchFinalMessageContent();
+                console.log('[OpenCode Server] fetchFinalMessageContent completed');
                 // After fetching, finalize and complete
                 this.finalizeStreaming();
                 this.hasCompleted = true;
@@ -872,7 +875,7 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
                   sessionId: this.currentSessionId || undefined,
                 });
               } catch (error) {
-                console.error('[OpenCode Server] Error fetching final message content:', error);
+                console.error('[OpenCode Server] Error in fetchFinalMessageContent IIFE:', error);
                 // Still complete even if fetch fails
                 this.finalizeStreaming();
                 this.hasCompleted = true;
@@ -882,6 +885,10 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
                 });
               }
             })();
+            // Log promise creation (but don't await - fire and forget)
+            void fetchPromise.catch((err) => {
+              console.error('[OpenCode Server] Unhandled promise rejection in fetchFinalMessageContent:', err);
+            });
             // Return early - completion will happen in async callback
             break;
           }
@@ -1247,7 +1254,11 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
    * This happens when the model responds with tool calls or when SSE events are missed
    */
   private async fetchFinalMessageContent(): Promise<void> {
-    if (!this.serverPort || !this.currentSessionId) return;
+    console.log('[OpenCode Server] fetchFinalMessageContent called - serverPort:', this.serverPort, 'sessionId:', this.currentSessionId);
+    if (!this.serverPort || !this.currentSessionId) {
+      console.warn('[OpenCode Server] Cannot fetch - missing serverPort or sessionId');
+      return;
+    }
 
     try {
       // Fetch messages for the session
@@ -1309,6 +1320,14 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
         this.assistantMessageIds.add(msgId);
         console.log('[OpenCode Server] Recovered text content:', textContent.substring(0, 100) + '...');
         this.emit('debug', { type: 'info', message: `Recovered text: ${textContent.substring(0, 50)}...` });
+        // Emit text-delta immediately so UI can display it
+        this.emit('text-delta', {
+          messageId: msgId,
+          content: textContent,
+          isComplete: true,
+        });
+      } else if (!textContent) {
+        console.log('[OpenCode Server] No text content found in message parts');
       }
 
       // Process any tool calls we might have missed
