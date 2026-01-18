@@ -886,9 +886,57 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
         });
         break;
 
+      case 'question.asked':
+        // OpenCode is asking a question via the AskUserQuestion tool
+        // This is different from message.part.updated tool handling - it's a dedicated SSE event
+        this.handleQuestionAskedEvent(data);
+        break;
+
       default:
         console.log('[OpenCode Server] Unhandled event type:', eventType);
     }
+  }
+
+  /**
+   * Handle question.asked SSE event
+   * This is emitted when OpenCode uses the AskUserQuestion tool
+   * Event structure: { type, properties: { id, sessionID, questions: [...], tool: { messageID, callID } } }
+   */
+  private handleQuestionAskedEvent(data: Record<string, unknown>): void {
+    const props = data.properties as Record<string, unknown> || data;
+    const questionId = props.id as string;
+    const questions = props.questions as Array<{
+      question: string;
+      header?: string;
+      options?: Array<{ label: string; description?: string }>;
+      multiple?: boolean;
+    }> | undefined;
+
+    console.log('[OpenCode Server] Question asked:', questionId);
+    this.emit('debug', { type: 'info', message: `Question asked: ${questionId}` });
+
+    if (!questions || questions.length === 0) {
+      console.warn('[OpenCode Server] No questions in question.asked event');
+      return;
+    }
+
+    const question = questions[0];
+    const permissionRequest: PermissionRequest = {
+      id: questionId,
+      taskId: this.currentTaskId || '',
+      type: 'question',
+      header: question.header,
+      question: question.question,
+      options: question.options?.map((o) => ({
+        label: o.label,
+        description: o.description,
+      })),
+      multiSelect: question.multiple,
+      createdAt: new Date().toISOString(),
+    };
+
+    console.log('[OpenCode Server] Emitting permission-request for question');
+    this.emit('permission-request', permissionRequest);
   }
 
   // Track which messages are from the assistant (vs user)
