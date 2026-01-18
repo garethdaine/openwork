@@ -16,6 +16,9 @@ import ReactMarkdown from 'react-markdown';
 import { StreamingText } from '../components/ui/streaming-text';
 import { isWaitingForUser } from '../lib/waiting-detection';
 import loadingSymbol from '/assets/loading-symbol.svg';
+import FolderPicker from '../components/ui/FolderPicker';
+import FileAttachment from '../components/ui/FileAttachment';
+import type { TaskConfigAttachment } from '@accomplish/shared';
 
 // Debug log entry type
 interface DebugLogEntry {
@@ -91,6 +94,8 @@ export default function ExecutionPage() {
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [customResponse, setCustomResponse] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
+  const [followUpFolder, setFollowUpFolder] = useState<string | null>(null);
+  const [followUpAttachments, setFollowUpAttachments] = useState<TaskConfigAttachment[]>([]);
 
   const {
     currentTask,
@@ -829,7 +834,7 @@ export default function ExecutionPage() {
         <div className="flex-shrink-0 border-t border-border bg-card/50 px-6 py-4">
           <div className="max-w-4xl mx-auto">
             {/* Input field with Send button */}
-            <div className="flex gap-3">
+            <div className="flex gap-3 mb-2">
               <Input
                 ref={followUpInputRef}
                 value={followUp}
@@ -851,6 +856,10 @@ export default function ExecutionPage() {
                 className="flex-1"
                 data-testid="execution-follow-up-input"
               />
+              <FileAttachment
+                attachments={followUpAttachments}
+                onAttachmentsChange={setFollowUpAttachments}
+              />
               <Button
                 onClick={handleFollowUp}
                 disabled={!followUp.trim() || isLoading}
@@ -860,6 +869,11 @@ export default function ExecutionPage() {
                 Send
               </Button>
             </div>
+            {/* Folder picker - shown for context but not changeable in follow-ups */}
+            <FolderPicker
+              value={followUpFolder}
+              onChange={setFollowUpFolder}
+            />
           </div>
         </div>
       )}

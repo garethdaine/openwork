@@ -9,6 +9,14 @@ export const taskConfigSchema = z.object({
   outputSchema: z.record(z.any()).optional(),
   sessionId: z.string().optional(),
   chrome: z.boolean().optional(),
+  attachments: z.array(
+    z.object({
+      type: z.enum(['file', 'image']),
+      path: z.string(),
+      name: z.string(),
+      size: z.number().optional(),
+    })
+  ).optional(),
 });
 
 export const permissionResponseSchema = z.object({

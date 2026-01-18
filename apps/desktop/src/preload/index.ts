@@ -129,6 +129,22 @@ const accomplishAPI = {
   getBedrockCredentials: () =>
     ipcRenderer.invoke('bedrock:get-credentials'),
 
+  // Folder operations
+  selectFolder: (): Promise<{ path: string; name: string } | null> =>
+    ipcRenderer.invoke('folder:select'),
+  getRecentFolders: (): Promise<Array<{ path: string; name: string; lastUsed: number }>> =>
+    ipcRenderer.invoke('folder:recent'),
+  validateFolder: (path: string): Promise<boolean> =>
+    ipcRenderer.invoke('folder:validate', path),
+  getAutoPathDetection: (): Promise<boolean> =>
+    ipcRenderer.invoke('settings:auto-path-detection'),
+  setAutoPathDetection: (enabled: boolean): Promise<void> =>
+    ipcRenderer.invoke('settings:set-auto-path-detection', enabled),
+
+  // File operations
+  selectFiles: (options?: { multiple?: boolean; filters?: Array<{ name: string; extensions: string[] }> }): Promise<Array<{ type: 'file' | 'image'; path: string; name: string; size?: number }>> =>
+    ipcRenderer.invoke('file:select', options),
+
   // Event subscriptions
   onTaskUpdate: (callback: (event: unknown) => void) => {
     const listener = (_: unknown, event: unknown) => callback(event);
@@ -173,6 +189,12 @@ const accomplishAPI = {
     const listener = (_: unknown, data: { enabled: boolean }) => callback(data);
     ipcRenderer.on('settings:streaming-mode-changed', listener);
     return () => ipcRenderer.removeListener('settings:streaming-mode-changed', listener);
+  },
+  // Auto-path detection setting changes
+  onAutoPathDetectionChange: (callback: (data: { enabled: boolean }) => void) => {
+    const listener = (_: unknown, data: { enabled: boolean }) => callback(data);
+    ipcRenderer.on('settings:auto-path-detection-changed', listener);
+    return () => ipcRenderer.removeListener('settings:auto-path-detection-changed', listener);
   },
   // Task status changes (e.g., queued -> running)
   onTaskStatusChange: (callback: (data: { taskId: string; status: string }) => void) => {

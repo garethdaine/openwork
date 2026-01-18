@@ -854,10 +854,36 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
           this.emit('debug', { type: 'info', message: `Streaming: ${this.streamingMessageId ? 'active' : 'none'}, text: ${this.streamingText?.length || 0} chars` });
           
           // If we didn't receive any streaming content, try to fetch it from the session
+          // We need to await this before completing to ensure all content is retrieved
           if (!this.streamingText && this.currentSessionId) {
             console.log('[OpenCode Server] No streaming content received, fetching from session...');
             this.emit('debug', { type: 'info', message: 'No streaming content - fetching from session' });
-            void this.fetchFinalMessageContent();
+            // Use IIFE to handle async operation in sync handler
+            void (async () => {
+              try {
+                await this.fetchFinalMessageContent();
+                // After fetching, finalize and complete
+                this.finalizeStreaming();
+                this.hasCompleted = true;
+                console.log('[OpenCode Server] Emitting complete event');
+                this.emit('debug', { type: 'info', message: 'Emitting complete event' });
+                this.emit('complete', {
+                  status: 'success',
+                  sessionId: this.currentSessionId || undefined,
+                });
+              } catch (error) {
+                console.error('[OpenCode Server] Error fetching final message content:', error);
+                // Still complete even if fetch fails
+                this.finalizeStreaming();
+                this.hasCompleted = true;
+                this.emit('complete', {
+                  status: 'success',
+                  sessionId: this.currentSessionId || undefined,
+                });
+              }
+            })();
+            // Return early - completion will happen in async callback
+            break;
           }
           
           this.finalizeStreaming();
@@ -1241,25 +1267,40 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
 
       const messages = await response.json() as Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>;
       
+      console.log('[OpenCode Server] Fetched messages from session:', messages.length);
+      this.emit('debug', { type: 'info', message: `Fetched ${messages.length} messages from session` });
+      
       // Find the last assistant message
       const lastAssistantMsg = [...messages].reverse().find(m => m.info?.role === 'assistant');
       if (!lastAssistantMsg) {
         console.log('[OpenCode Server] No assistant message found in session');
+        this.emit('debug', { type: 'warn', message: 'No assistant message in session' });
         return;
       }
 
       const msgId = lastAssistantMsg.info.id as string;
       const parts = lastAssistantMsg.parts || [];
       
+      console.log('[OpenCode Server] Last assistant message:', msgId, 'parts:', parts.length);
+      console.log('[OpenCode Server] Message parts types:', parts.map(p => p.type || 'unknown'));
+      
       // Extract text content
       const textParts = parts.filter(p => p.type === 'text');
-      const textContent = textParts.map(p => (p.text || '') as string).join('');
+      const textContent = textParts.map(p => (p.text || p.content || '') as string).join('');
       
       // Extract tool calls
-      const toolParts = parts.filter(p => p.type === 'tool');
+      const toolParts = parts.filter(p => p.type === 'tool' || p.type === 'tool_call' || p.type === 'tool_use');
       
       console.log('[OpenCode Server] Fetched message:', msgId, 'text:', textContent.length, 'chars, tools:', toolParts.length);
       this.emit('debug', { type: 'info', message: `Fetched: ${textContent.length} chars, ${toolParts.length} tools` });
+      
+      if (textContent.length > 0) {
+        console.log('[OpenCode Server] Text content preview:', textContent.substring(0, 100));
+      }
+      
+      if (toolParts.length > 0) {
+        console.log('[OpenCode Server] Tool parts:', toolParts.map(p => ({ type: p.type, tool: p.tool || p.name })));
+      }
 
       // If there's text content we didn't receive via streaming, emit it now
       if (textContent && !this.streamingText) {

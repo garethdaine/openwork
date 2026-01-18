@@ -2,6 +2,15 @@ import Store from 'electron-store';
 import type { SelectedModel, OllamaConfig } from '@accomplish/shared';
 
 /**
+ * Recent folder entry
+ */
+export interface RecentFolder {
+  path: string;
+  name: string;
+  lastUsed: number;
+}
+
+/**
  * App settings schema
  */
 interface AppSettingsSchema {
@@ -15,6 +24,10 @@ interface AppSettingsSchema {
   ollamaConfig: OllamaConfig | null;
   /** Enable streaming mode for real-time model responses (uses opencode serve) */
   streamingMode: boolean;
+  /** Recent folders used for working directory selection */
+  recentFolders: RecentFolder[];
+  /** Auto-detect paths in prompts and use as working directory */
+  autoPathDetection: boolean;
 }
 
 const appSettingsStore = new Store<AppSettingsSchema>({
@@ -28,6 +41,8 @@ const appSettingsStore = new Store<AppSettingsSchema>({
     },
     ollamaConfig: null,
     streamingMode: true, // Default to enabled for real-time streaming
+    recentFolders: [],
+    autoPathDetection: false,
   },
 });
 
@@ -104,6 +119,49 @@ export function setStreamingMode(enabled: boolean): void {
 }
 
 /**
+ * Get recent folders
+ */
+export function getRecentFolders(): RecentFolder[] {
+  return appSettingsStore.get('recentFolders');
+}
+
+/**
+ * Add or update a recent folder
+ */
+export function addRecentFolder(path: string, name: string): void {
+  const folders = getRecentFolders();
+  const existingIndex = folders.findIndex(f => f.path === path);
+  
+  if (existingIndex >= 0) {
+    // Update existing entry
+    folders[existingIndex] = { path, name, lastUsed: Date.now() };
+  } else {
+    // Add new entry
+    folders.push({ path, name, lastUsed: Date.now() });
+  }
+  
+  // Sort by last used (most recent first) and limit to 10
+  folders.sort((a, b) => b.lastUsed - a.lastUsed);
+  const limited = folders.slice(0, 10);
+  
+  appSettingsStore.set('recentFolders', limited);
+}
+
+/**
+ * Get auto-path detection setting
+ */
+export function getAutoPathDetection(): boolean {
+  return appSettingsStore.get('autoPathDetection');
+}
+
+/**
+ * Set auto-path detection setting
+ */
+export function setAutoPathDetection(enabled: boolean): void {
+  appSettingsStore.set('autoPathDetection', enabled);
+}
+
+/**
  * Get all app settings
  */
 export function getAppSettings(): AppSettingsSchema {
@@ -113,6 +171,8 @@ export function getAppSettings(): AppSettingsSchema {
     selectedModel: appSettingsStore.get('selectedModel'),
     ollamaConfig: appSettingsStore.get('ollamaConfig') ?? null,
     streamingMode: appSettingsStore.get('streamingMode'),
+    recentFolders: appSettingsStore.get('recentFolders'),
+    autoPathDetection: appSettingsStore.get('autoPathDetection'),
   };
 }
 

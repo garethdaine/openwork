@@ -138,7 +138,7 @@ Openwork is an open source AI desktop agent that automates file management, docu
 
 ## Privacy and local-first
 
-Openwork runs locally on your machine. Your files stay on your device, and you choose which folders it can access.
+Openwork runs locally on your machine. Your files stay on your device, and you choose which folders it can access. You can select a working directory for each task or enable auto-path detection to automatically use paths mentioned in your prompts.
 
 <br />
 
@@ -161,7 +161,7 @@ Openwork runs locally on your machine. Your files stay on your device, and you c
 |:----:|--------|---------|
 | **1** | **Install the App** | Download the DMG and drag it into Applications |
 | **2** | **Connect Your AI** | Use your own OpenAI or Anthropic API key, or [Ollama](docs/ollama-setup.md) for fully local AI |
-| **3** | **Give It Access** | Choose which folders it can see. You stay in control. |
+| **3** | **Choose Working Directory** | Select a folder for file operations or attach files/photos to provide context |
 | **4** | **Start Working** | Ask it to summarize a doc, clean a folder, or create a report. You approve everything. |
 
 <br />
@@ -271,6 +271,28 @@ Toggle in Settings → "Enable Streaming Mode". Streaming provides a better expe
 </details>
 
 <details>
+<summary><strong>Working Directory & File Attachments</strong></summary>
+
+**Folder Picker:**
+- Select a working directory for file operations when creating a task
+- Choose from recent folders or browse for a different directory
+- Available on both the home screen and during active conversations
+- The selected folder becomes the working directory for that task session
+
+**File Attachments:**
+- Attach files or photos to provide context for your tasks
+- Supported file types: text files, code files, images (png, jpg, gif, webp)
+- Attachments are available to the AI when processing your request
+
+**Auto-Path Detection:**
+- Enable in Settings → "Auto-detect paths in prompts"
+- When enabled, the AI automatically uses paths mentioned in your prompt as working directories
+- Example: "Create a file in ~/Documents/project" will use that path automatically
+- **Warning:** This grants the AI access to any path you mention, so use with caution
+
+</details>
+
+<details>
 <summary><strong>Ollama Support</strong></summary>
 
 Run fully local AI with [Ollama](https://ollama.com):
@@ -283,6 +305,8 @@ Run fully local AI with [Ollama](https://ollama.com):
 - Automatic context window detection and configuration
 - Creates optimized model variants with correct context sizes
 - Works with remote Ollama servers
+- Tool calling support (file operations, permissions, user questions)
+- Recommended models: Qwen3:8b for reliable tool calling
 
 See [docs/ollama-setup.md](docs/ollama-setup.md) for detailed setup instructions.
 

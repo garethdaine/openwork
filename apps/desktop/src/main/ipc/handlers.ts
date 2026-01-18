@@ -1,5 +1,7 @@
-import { ipcMain, BrowserWindow, shell, app } from 'electron';
+import { ipcMain, BrowserWindow, shell, app, dialog } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
+import * as path from 'path';
+import * as fs from 'fs/promises';
 import { URL } from 'url';
 import {
   isOpenCodeCliInstalled,
@@ -42,6 +44,11 @@ import {
   setOllamaConfig,
   getStreamingMode,
   setStreamingMode,
+  getRecentFolders,
+  addRecentFolder,
+  getAutoPathDetection,
+  setAutoPathDetection,
+  type RecentFolder,
 } from '../store/appSettings';
 import { getDesktopConfig } from '../config';
 import {
@@ -228,6 +235,17 @@ function validateTaskConfig(config: TaskConfig): TaskConfig {
   }
   if (config.workingDirectory) {
     validated.workingDirectory = sanitizeString(config.workingDirectory, 'workingDirectory', 1024);
+  }
+  if (Array.isArray(config.attachments)) {
+    validated.attachments = config.attachments
+      .filter((att): att is NonNullable<typeof att> => att != null && typeof att === 'object')
+      .map((att) => ({
+        type: (att.type === 'file' || att.type === 'image') ? att.type : 'file',
+        path: sanitizeString(att.path, 'attachment path', 1024),
+        name: sanitizeString(att.name, 'attachment name', 256),
+        size: typeof att.size === 'number' && att.size >= 0 ? att.size : undefined,
+      }))
+      .slice(0, 20); // Limit to 20 attachments
   }
   if (Array.isArray(config.allowedTools)) {
     validated.allowedTools = config.allowedTools
@@ -1462,6 +1480,126 @@ export function registerIPCHandlers(): void {
       return { ok: true };
     }
   );
+
+  // Folder: Select folder via native dialog
+  handle('folder:select', async (event: IpcMainInvokeEvent) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) {
+      throw new Error('No window available');
+    }
+
+    const result = await dialog.showOpenDialog(window, {
+      properties: ['openDirectory'],
+      title: 'Select Working Directory',
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    const selectedPath = result.filePaths[0];
+    
+    // Extract folder name from path (last directory name)
+    const folderName = path.basename(selectedPath);
+    
+    // Add to recent folders
+    addRecentFolder(selectedPath, folderName);
+    
+    return {
+      path: selectedPath,
+      name: folderName,
+    };
+  });
+
+  // Folder: Get recent folders
+  handle('folder:recent', async (_event: IpcMainInvokeEvent): Promise<RecentFolder[]> => {
+    return getRecentFolders();
+  });
+
+  // Folder: Validate path exists and is accessible
+  handle('folder:validate', async (_event: IpcMainInvokeEvent, folderPath: string): Promise<boolean> => {
+    if (!folderPath || typeof folderPath !== 'string') {
+      return false;
+    }
+
+    try {
+      const stats = await fs.stat(folderPath);
+      return stats.isDirectory();
+    } catch {
+      return false;
+    }
+  });
+
+  // Settings: Get auto-path detection setting
+  handle('settings:auto-path-detection', async (_event: IpcMainInvokeEvent) => {
+    return getAutoPathDetection();
+  });
+
+  // Settings: Set auto-path detection setting
+  handle('settings:set-auto-path-detection', async (_event: IpcMainInvokeEvent, enabled: boolean) => {
+    if (typeof enabled !== 'boolean') {
+      throw new Error('Invalid auto-path detection flag');
+    }
+    setAutoPathDetection(enabled);
+    // Broadcast the change to all renderer windows
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('settings:auto-path-detection-changed', { enabled });
+    }
+  });
+
+  // File: Select files via native dialog
+  handle('file:select', async (event: IpcMainInvokeEvent, options?: { multiple?: boolean; filters?: Array<{ name: string; extensions: string[] }> }) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) {
+      throw new Error('No window available');
+    }
+
+    const defaultFilters = [
+      { name: 'All Files', extensions: ['*'] },
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
+      { name: 'Text Files', extensions: ['txt', 'md', 'json', 'csv'] },
+      { name: 'Code Files', extensions: ['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'cpp', 'c', 'h', 'html', 'css'] },
+    ];
+
+    const dialogProperties: Array<'openFile' | 'multiSelections'> = ['openFile'];
+    if (options?.multiple) {
+      dialogProperties.push('multiSelections');
+    }
+
+    const result = await dialog.showOpenDialog(window, {
+      properties: dialogProperties,
+      filters: options?.filters || defaultFilters,
+      title: 'Select Files',
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return [];
+    }
+
+    // Get file stats for each selected file
+    const files = await Promise.all(
+      result.filePaths.map(async (filePath) => {
+        try {
+          const stats = await fs.stat(filePath);
+          const name = path.basename(filePath);
+          const ext = path.extname(name).toLowerCase().slice(1);
+          const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext);
+
+          return {
+            type: isImage ? 'image' as const : 'file' as const,
+            path: filePath,
+            name,
+            size: stats.size,
+          };
+        } catch (error) {
+          console.error(`Failed to get stats for ${filePath}:`, error);
+          return null;
+        }
+      })
+    );
+
+    return files.filter((f): f is NonNullable<typeof f> => f !== null);
+  });
 }
 
 function createTaskId(): string {

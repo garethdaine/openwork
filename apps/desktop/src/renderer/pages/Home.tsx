@@ -10,6 +10,7 @@ import { getAccomplish } from '../lib/accomplish';
 import { springs, staggerContainer, staggerItem } from '../lib/animations';
 import { Card, CardContent } from '@/components/ui/card';
 import { ChevronDown } from 'lucide-react';
+import type { TaskConfigAttachment } from '@accomplish/shared';
 
 // Import use case images for proper bundling in production
 import calendarPrepNotesImg from '/assets/usecases/calendar-prep-notes.png';
@@ -83,6 +84,8 @@ export default function HomePage() {
   const [prompt, setPrompt] = useState('');
   const [showExamples, setShowExamples] = useState(true);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<TaskConfigAttachment[]>([]);
   const { startTask, isLoading, addTaskUpdate, setPermissionRequest } = useTaskStore();
   const navigate = useNavigate();
   const accomplish = getAccomplish();
@@ -103,15 +106,65 @@ export default function HomePage() {
     };
   }, [addTaskUpdate, setPermissionRequest, accomplish]);
 
+  // Auto-detect path from prompt if enabled
+  const detectPathFromPrompt = useCallback((text: string): string | null => {
+    // Try to match common path patterns:
+    // - /Users/username/...
+    // - ~/...
+    // - ./relative/path
+    // - ../relative/path
+    // - Absolute paths starting with /
+    const pathPatterns = [
+      /(?:^|\s)(~\/[^\s"'`]+)/,  // ~/path/to/file
+      /(?:^|\s)(\/[^\s"'`]+)/,   // /absolute/path
+      /(?:^|\s)(\.\/[^\s"'`]+)/, // ./relative/path
+      /(?:^|\s)(\.\.\/[^\s"'`]+)/, // ../relative/path
+    ];
+
+    for (const pattern of pathPatterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        // Return path as-is (backend will handle ~ expansion)
+        return match[1];
+      }
+    }
+    return null;
+  }, []);
+
   const executeTask = useCallback(async () => {
     if (!prompt.trim() || isLoading) return;
 
+    // Check auto-path detection setting
+    let workingDir = selectedFolder || undefined;
+    try {
+      // @ts-expect-error - Method not yet in type definitions
+      const autoPathEnabled = await accomplish.getAutoPathDetection();
+      if (autoPathEnabled && !workingDir) {
+        const detectedPath = detectPathFromPrompt(prompt);
+        if (detectedPath) {
+          // Validate the path
+          // @ts-expect-error - Method not yet in type definitions
+          const isValid = await accomplish.validateFolder(detectedPath);
+          if (isValid) {
+            workingDir = detectedPath;
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to check auto-path detection or validate path:', error);
+    }
+
     const taskId = `task_${Date.now()}`;
-    const task = await startTask({ prompt: prompt.trim(), taskId });
+    const task = await startTask({
+      prompt: prompt.trim(),
+      taskId,
+      workingDirectory: workingDir,
+      attachments: attachments.length > 0 ? attachments : undefined,
+    });
     if (task) {
       navigate(`/execution/${task.id}`);
     }
-  }, [prompt, isLoading, startTask, navigate]);
+  }, [prompt, isLoading, startTask, navigate, selectedFolder, attachments, detectPathFromPrompt, accomplish]);
 
   const handleSubmit = async () => {
     if (!prompt.trim() || isLoading) return;
@@ -184,6 +237,11 @@ export default function HomePage() {
                 placeholder="Describe a task and let AI handle the rest"
                 large={true}
                 autoFocus={true}
+                workingDirectory={selectedFolder}
+                onWorkingDirectoryChange={setSelectedFolder}
+                attachments={attachments}
+                onAttachmentsChange={setAttachments}
+                showControls={true}
               />
             </CardContent>
 

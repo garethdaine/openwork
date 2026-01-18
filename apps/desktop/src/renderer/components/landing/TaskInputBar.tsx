@@ -4,6 +4,9 @@ import { useRef, useEffect } from 'react';
 import { getAccomplish } from '../../lib/accomplish';
 import { analytics } from '../../lib/analytics';
 import { CornerDownLeft, Loader2 } from 'lucide-react';
+import FolderPicker from '../ui/FolderPicker';
+import FileAttachment from '../ui/FileAttachment';
+import type { TaskConfigAttachment } from '@accomplish/shared';
 
 interface TaskInputBarProps {
   value: string;
@@ -14,6 +17,11 @@ interface TaskInputBarProps {
   disabled?: boolean;
   large?: boolean;
   autoFocus?: boolean;
+  workingDirectory?: string | null;
+  onWorkingDirectoryChange?: (path: string | null) => void;
+  attachments?: TaskConfigAttachment[];
+  onAttachmentsChange?: (attachments: TaskConfigAttachment[]) => void;
+  showControls?: boolean; // Show folder picker and file attachment
 }
 
 export default function TaskInputBar({
@@ -25,6 +33,11 @@ export default function TaskInputBar({
   disabled = false,
   large = false,
   autoFocus = false,
+  workingDirectory,
+  onWorkingDirectoryChange,
+  attachments,
+  onAttachmentsChange,
+  showControls = true,
 }: TaskInputBarProps) {
   const isDisabled = disabled || isLoading;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -54,43 +67,63 @@ export default function TaskInputBar({
   };
 
   return (
-    <div className="relative flex items-end gap-2 rounded-xl border border-border bg-background px-3 py-2.5 shadow-sm transition-all duration-200 ease-accomplish focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
-      {/* Text input */}
-      <textarea
-        data-testid="task-input-textarea"
-        ref={textareaRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        disabled={isDisabled}
-        rows={1}
-        className={`max-h-[200px] min-h-[36px] flex-1 resize-none bg-transparent text-foreground placeholder:text-gray-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${large ? 'text-[20px]' : 'text-sm'}`}
-      />
+    <div className="flex flex-col gap-2">
+      <div className="relative flex items-end gap-2 rounded-xl border border-border bg-background px-3 py-2.5 shadow-sm transition-all duration-200 ease-accomplish focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
+        {/* Text input */}
+        <textarea
+          data-testid="task-input-textarea"
+          ref={textareaRef}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          disabled={isDisabled}
+          rows={1}
+          className={`max-h-[200px] min-h-[36px] flex-1 resize-none bg-transparent text-foreground placeholder:text-gray-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${large ? 'text-[20px]' : 'text-sm'}`}
+        />
 
-      {/* Submit button */}
-      <button
-        data-testid="task-input-submit"
-        type="button"
-        onClick={() => {
-          analytics.trackSubmitTask();
-          accomplish.logEvent({
-            level: 'info',
-            message: 'Task input submit clicked',
-            context: { prompt: value },
-          });
-          onSubmit();
-        }}
-        disabled={!value.trim() || isDisabled}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-all duration-200 ease-accomplish hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
-        title="Submit"
-      >
-        {isLoading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <CornerDownLeft className="h-4 w-4" />
+        {/* File attachment button */}
+        {showControls && (
+          <FileAttachment
+            attachments={attachments}
+            onAttachmentsChange={onAttachmentsChange}
+          />
         )}
-      </button>
+
+        {/* Submit button */}
+        <button
+          data-testid="task-input-submit"
+          type="button"
+          onClick={() => {
+            analytics.trackSubmitTask();
+            accomplish.logEvent({
+              level: 'info',
+              message: 'Task input submit clicked',
+              context: { prompt: value },
+            });
+            onSubmit();
+          }}
+          disabled={!value.trim() || isDisabled}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-all duration-200 ease-accomplish hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Submit"
+        >
+          {isLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <CornerDownLeft className="h-4 w-4" />
+          )}
+        </button>
+      </div>
+
+      {/* Bottom controls: Folder picker */}
+      {showControls && (
+        <div className="flex items-center justify-between px-1">
+          <FolderPicker
+            value={workingDirectory}
+            onChange={onWorkingDirectoryChange}
+          />
+        </div>
+      )}
     </div>
   );
 }

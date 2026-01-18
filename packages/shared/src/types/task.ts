@@ -12,6 +12,13 @@ export type TaskStatus =
   | 'cancelled'
   | 'interrupted';
 
+export interface TaskConfigAttachment {
+  type: 'file' | 'image';
+  path: string;
+  name: string;
+  size?: number;
+}
+
 export interface TaskConfig {
   /** The task prompt/description */
   prompt: string;
@@ -27,6 +34,8 @@ export interface TaskConfig {
   outputSchema?: object;
   /** Session ID for resuming */
   sessionId?: string;
+  /** Attached files or images for context */
+  attachments?: TaskConfigAttachment[];
 }
 
 export interface Task {
