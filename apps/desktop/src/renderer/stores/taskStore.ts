@@ -308,10 +308,31 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
       // Handle message events - only if viewing this task
       if (event.type === 'message' && event.message && isCurrentTask && state.currentTask) {
-        updatedCurrentTask = {
-          ...state.currentTask,
-          messages: [...state.currentTask.messages, event.message],
-        };
+        // Check if message with this ID already exists (e.g., from streaming)
+        // If so, update it instead of adding a duplicate
+        const existingIndex = state.currentTask.messages.findIndex(
+          (m) => m.id === event.message!.id
+        );
+
+        if (existingIndex >= 0) {
+          // Update existing message (mark as no longer streaming, update content)
+          const updatedMessages = [...state.currentTask.messages];
+          updatedMessages[existingIndex] = {
+            ...updatedMessages[existingIndex],
+            ...event.message,
+            isStreaming: false,
+          };
+          updatedCurrentTask = {
+            ...state.currentTask,
+            messages: updatedMessages,
+          };
+        } else {
+          // Add new message
+          updatedCurrentTask = {
+            ...state.currentTask,
+            messages: [...state.currentTask.messages, event.message],
+          };
+        }
       }
 
       // Handle complete events
