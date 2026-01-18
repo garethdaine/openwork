@@ -205,12 +205,20 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
   /**
    * Preload an Ollama model to ensure it's in memory before creating a session
    * This works around OpenCode's tendency to use cached/default models
+   *
+   * IMPORTANT: We set num_ctx here to override Ollama's default 4096 context window.
+   * Ollama silently truncates conversation history if the context window is too small,
+   * which causes follow-up messages to lose context.
+   * See: https://github.com/sst/opencode/issues/3250
    */
   private async preloadOllamaModel(modelName: string, baseUrl?: string): Promise<void> {
     const ollamaHost = baseUrl || process.env.OLLAMA_HOST || 'http://localhost:11434';
+    // Use 32K context window for Ollama models (default is only 4096)
+    // This is critical for multi-turn conversations to maintain context
+    const numCtx = 32768;
 
-    console.log('[OpenCode Server] Preloading Ollama model:', modelName, 'at', ollamaHost);
-    this.emit('debug', { type: 'info', message: `Preloading Ollama model: ${modelName}` });
+    console.log('[OpenCode Server] Preloading Ollama model:', modelName, 'at', ollamaHost, 'with num_ctx:', numCtx);
+    this.emit('debug', { type: 'info', message: `Preloading Ollama model: ${modelName} with num_ctx: ${numCtx}` });
 
     try {
       // First, try to set the default model in OpenCode's config
@@ -234,7 +242,14 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
         }
       }
 
-      // Send a minimal chat request to load the model into memory
+      // Send a minimal chat request to load the model into memory with a large context window
+      // NOTE: When OpenCode's OpenAI-compatible API makes requests without num_ctx,
+      // Ollama may reload the model with default settings (4096 context).
+      // We use keep_alive to try to keep the model loaded with our settings.
+      // For best results, users should create a custom model with a Modelfile:
+      //   FROM <model-name>
+      //   PARAMETER num_ctx 32768
+      // See: https://github.com/sst/opencode/issues/3250
       const response = await fetch(`${ollamaHost}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -242,14 +257,18 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
           model: modelName,
           messages: [{ role: 'user', content: 'hi' }],
           stream: false,
-          options: { num_predict: 1 }, // Generate minimal response
+          keep_alive: '30m', // Keep model loaded for 30 minutes
+          options: {
+            num_predict: 1,  // Generate minimal response (just for preload)
+            num_ctx: numCtx, // Set large context window
+          },
         }),
         signal: AbortSignal.timeout(60000), // 60s timeout for model loading
       });
 
       if (response.ok) {
-        console.log('[OpenCode Server] Model preloaded successfully:', modelName);
-        this.emit('debug', { type: 'info', message: `Model preloaded: ${modelName}` });
+        console.log('[OpenCode Server] Model preloaded successfully with num_ctx:', numCtx);
+        this.emit('debug', { type: 'info', message: `Model preloaded with num_ctx: ${numCtx}` });
       } else {
         const error = await response.text();
         console.warn('[OpenCode Server] Model preload warning:', error);
