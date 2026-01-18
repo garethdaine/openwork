@@ -973,14 +973,28 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
   private finalizeStreaming(): void {
     if (this.streamingMessageId && this.streamingText) {
       // Emit final text via text-delta (the frontend updateStreamingMessage handles this)
-      // NOTE: We do NOT emit a 'message' event here because text-delta already
-      // creates/updates the message in the frontend store. Emitting both would
-      // cause duplicate messages.
       this.emit('text-delta', {
         messageId: this.streamingMessageId,
         content: this.streamingText,
         isComplete: true,
       });
+
+      // Also emit a 'message' event so the assistant message gets saved to task history.
+      // This is critical for persistence - without this, responses are lost on app restart.
+      // The frontend handles deduplication via message ID.
+      const finalMessage: OpenCodeMessage = {
+        type: 'text',
+        timestamp: Date.now(),
+        sessionID: this.currentSessionId || undefined,
+        part: {
+          id: this.streamingMessageId,
+          sessionID: this.currentSessionId || '',
+          messageID: this.streamingMessageId,
+          type: 'text',
+          text: this.streamingText,
+        },
+      };
+      this.emit('message', finalMessage);
     }
 
     this.streamingMessageId = null;
