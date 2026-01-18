@@ -178,20 +178,44 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
             const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant');
             if (lastAssistantMsg) {
               const sessionModelId = lastAssistantMsg.modelID as string | undefined;
-              // Extract base model name (e.g., "qwen3:8b" from "qwen3:8b-32k" or "ollama/qwen3:8b-32k")
+              // Extract base model name from current selection
+              // Input examples: "ollama/qwen3:8b-32k", "qwen3:8b-32k-ctx40k", "llama3.3:latest"
               const currentModelRaw = selectedModel?.model?.split('/').pop() || '';
-              // Remove context suffix like "-32k", "-ctx40k" to get base model
-              const currentModelBase = currentModelRaw.replace(/-\d+k$/i, '').replace(/-ctx\d+k$/i, '');
-              const sessionModelBase = sessionModelId?.replace(/-\d+k$/i, '').replace(/-ctx\d+k$/i, '') || '';
 
-              console.log('[OpenCode Server] Model comparison - session:', sessionModelBase, 'current:', currentModelBase);
-              this.emit('debug', { type: 'info', message: `Model comparison - session: ${sessionModelBase}, current: ${currentModelBase}` });
+              // Extract the core model identifier (family:size) from various naming patterns
+              // This handles: "qwen3:8b-32k", "qwen3:8b-32k-ctx40k", "qwen2.5:32b-32k-ctx32k", "llama3.3:latest"
+              // We want to extract: "qwen3:8b", "qwen2.5:32b", "llama3.3:latest"
+              const extractCoreModel = (modelName: string): string => {
+                if (!modelName) return '';
+                // Remove common suffixes: -ctx\d+k, -\d+k (context sizes added by users or our app)
+                // But preserve the core model tag (e.g., :8b, :32b, :latest, :instruct)
+                let cleaned = modelName;
+                // Remove our app's context suffix (e.g., -ctx40k, -ctx32k)
+                cleaned = cleaned.replace(/-ctx\d+k$/i, '');
+                // Remove user's custom context suffix (e.g., -32k at the end)
+                // But only if there's already a size tag (like :8b, :32b) before it
+                // Pattern: model:tag-Nk -> model:tag
+                cleaned = cleaned.replace(/(:\d+b)-\d+k$/i, '$1');
+                cleaned = cleaned.replace(/(:latest)-\d+k$/i, '$1');
+                cleaned = cleaned.replace(/(:instruct)-\d+k$/i, '$1');
+                return cleaned;
+              };
 
-              // Compare the base model family (e.g., "qwen3:8b" vs "qwen2.5:32b")
-              if (sessionModelBase && currentModelBase && sessionModelBase !== currentModelBase) {
-                console.log('[OpenCode Server] Model CHANGED from', sessionModelBase, 'to', currentModelBase);
+              const currentModelCore = extractCoreModel(currentModelRaw);
+              const sessionModelCore = extractCoreModel(sessionModelId || '');
+
+              console.log('[OpenCode Server] Model comparison:');
+              console.log('[OpenCode Server]   Session raw:', sessionModelId);
+              console.log('[OpenCode Server]   Current raw:', currentModelRaw);
+              console.log('[OpenCode Server]   Session core:', sessionModelCore);
+              console.log('[OpenCode Server]   Current core:', currentModelCore);
+              this.emit('debug', { type: 'info', message: `Model comparison - session: ${sessionModelCore}, current: ${currentModelCore}` });
+
+              // Compare the core model identifiers
+              if (sessionModelCore && currentModelCore && sessionModelCore !== currentModelCore) {
+                console.log('[OpenCode Server] Model CHANGED from', sessionModelCore, 'to', currentModelCore);
                 console.log('[OpenCode Server] Creating NEW session for new model (existing conversation will be preserved separately)');
-                this.emit('debug', { type: 'warning', message: `Model changed: ${sessionModelBase} → ${currentModelBase}. Creating new session.` });
+                this.emit('debug', { type: 'warning', message: `Model changed: ${sessionModelCore} → ${currentModelCore}. Creating new session.` });
                 shouldCreateNewSession = true;
               } else {
                 console.log('[OpenCode Server] Model unchanged, will reuse session');
