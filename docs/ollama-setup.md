@@ -20,16 +20,18 @@ This guide covers how to configure [Ollama](https://ollama.com) with Openwork fo
 
 ### The Challenge
 
-Ollama's OpenAI-compatible endpoint (`/v1/chat/completions`) doesn't support setting `num_ctx` (context window size) in API requests. This means that without special handling, models default to a 4096-token context window, even if they support much larger contexts.
+Ollama's OpenAI-compatible endpoint (`/v1/chat/completions`) doesn't support setting `num_ctx` (context window size) in API requests. This means that without special handling, models default to a 4096-token context window, even if they support much larger contexts (32K, 40K, 128K+).
 
-### How Openwork Solves This
+### How Openwork Solves This (Automatic)
 
-Openwork automatically creates **custom model variants** with the desired context window baked in:
+Openwork automatically creates **custom model variants** with the desired context window baked in. **You don't need to create Modelfiles manually** - Openwork handles this for you:
 
 1. When you start a task, Openwork checks if a variant exists (e.g., `qwen3:8b-ctx40k`)
-2. If not, it creates one using Ollama's `/api/create` endpoint with a Modelfile
+2. If not, it automatically creates one using Ollama's `/api/create` endpoint
 3. The variant has `PARAMETER num_ctx` permanently set
 4. All requests use the variant, ensuring consistent context handling
+
+This happens transparently - you just select a model and Openwork ensures it has the right context window.
 
 ### Configuration Options
 
@@ -84,15 +86,64 @@ To use Ollama running on another machine:
 
 **Security Note:** Ollama doesn't have built-in authentication. Only expose it on trusted networks or use a reverse proxy with authentication.
 
+## Tool Calling Support
+
+Openwork uses MCP (Model Context Protocol) tools for file permissions, user questions, and browser automation. Tool calling support varies significantly between Ollama models.
+
+### Tool Calling Requirements
+
+For tools to work properly, the model must:
+1. Support function/tool calling in Ollama
+2. Have the correct chat template with tool schema
+3. Be running on Ollama 0.8.0+ (for streaming tool calls)
+
+### Known Tool Calling Behavior
+
+| Model Family | Tool Support | Notes |
+|--------------|--------------|-------|
+| **Qwen3** | ✅ Good | Officially supported, recommended for tool use |
+| **Qwen2.5 (small, e.g. 7b)** | ⚠️ Partial | More reliable than larger variants |
+| **Qwen2.5 (large, e.g. 32b)** | ❌ Unreliable | Often says it will use tools but doesn't |
+| **Llama 3.2** | ✅ Good | Good tool support |
+| **DeepSeek Coder** | ❌ Limited | Coding-focused, minimal tool support |
+| **CodeStral** | ❌ Limited | Coding-focused, minimal tool support |
+
+### Common Tool Calling Issues
+
+**Model says it will use a tool but doesn't:**
+- This is a known issue with some models (especially Qwen2.5 32b)
+- The model generates text describing what it would do, but never actually calls the tool
+- **Solution:** Switch to a model with better tool support (e.g., Qwen3:8b)
+
+**"Does not support tools" error:**
+- Some model variants lack the required chat template
+- **Solution:** Use the official Ollama model, not custom quantized versions
+
+**Tools work sometimes but not consistently:**
+- Long conversations can cause models to "forget" about tools
+- **Solution:** Start a new conversation or use a model with more reliable tool support
+
+### Recommended Models for Tool Use
+
+If you need tool calling (file operations, browser automation, user interactions):
+
+1. **Qwen3:8b** - Best balance of capability and reliability
+2. **Llama 3.2:3b** - Fast, reliable tool support, lower resource usage
+3. **Qwen3:14b** - More capable, still good tool support
+
+If you only need text generation/coding without tools:
+- DeepSeek Coder, CodeStral, and Qwen2.5 Coder work well
+
 ## Recommended Models
 
-| Model | Size | Context | Best For |
-|-------|------|---------|----------|
-| `qwen3:8b` | 8B | 40K | General coding, good balance |
-| `qwen3:14b` | 14B | 40K | Better reasoning, more VRAM |
-| `deepseek-coder-v2:16b` | 16B | 128K | Long context coding tasks |
-| `codestral:22b` | 22B | 32K | Advanced code generation |
-| `llama3.2:3b` | 3B | 128K | Fast, lower resource usage |
+| Model | Size | Context | Tool Support | Best For |
+|-------|------|---------|--------------|----------|
+| `qwen3:8b` | 8B | 40K | ✅ Good | General coding with tools |
+| `qwen3:14b` | 14B | 40K | ✅ Good | Better reasoning with tools |
+| `llama3.2:3b` | 3B | 128K | ✅ Good | Fast, lower resource usage |
+| `qwen2.5:7b` | 7B | 128K | ⚠️ Partial | Text generation, limited tools |
+| `deepseek-coder-v2:16b` | 16B | 128K | ❌ Limited | Long context coding (no tools) |
+| `codestral:22b` | 22B | 32K | ❌ Limited | Advanced code generation (no tools) |
 
 ## Troubleshooting
 
