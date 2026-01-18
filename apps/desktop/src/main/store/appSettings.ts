@@ -1,5 +1,5 @@
 import Store from 'electron-store';
-import type { SelectedModel, OllamaConfig } from '@accomplish/shared';
+import type { SelectedModel, OllamaConfig, LiteLLMConfig } from '@accomplish/shared';
 
 /**
  * Recent folder entry
@@ -22,6 +22,8 @@ interface AppSettingsSchema {
   selectedModel: SelectedModel | null;
   /** Ollama server configuration */
   ollamaConfig: OllamaConfig | null;
+  /** LiteLLM proxy configuration */
+  litellmConfig: LiteLLMConfig | null;
   /** Enable streaming mode for real-time model responses (uses opencode serve) */
   streamingMode: boolean;
   /** Recent folders used for working directory selection */
@@ -40,6 +42,7 @@ const appSettingsStore = new Store<AppSettingsSchema>({
       model: 'anthropic/claude-opus-4-5',
     },
     ollamaConfig: null,
+    litellmConfig: null,
     streamingMode: true, // Default to enabled for real-time streaming
     recentFolders: [],
     autoPathDetection: false,
@@ -100,6 +103,20 @@ export function getOllamaConfig(): OllamaConfig | null {
  */
 export function setOllamaConfig(config: OllamaConfig | null): void {
   appSettingsStore.set('ollamaConfig', config);
+}
+
+/**
+ * Get LiteLLM configuration
+ */
+export function getLiteLLMConfig(): LiteLLMConfig | null {
+  return appSettingsStore.get('litellmConfig');
+}
+
+/**
+ * Set LiteLLM configuration
+ */
+export function setLiteLLMConfig(config: LiteLLMConfig | null): void {
+  appSettingsStore.set('litellmConfig', config);
 }
 
 /**
@@ -170,6 +187,7 @@ export function getAppSettings(): AppSettingsSchema {
     onboardingComplete: appSettingsStore.get('onboardingComplete'),
     selectedModel: appSettingsStore.get('selectedModel'),
     ollamaConfig: appSettingsStore.get('ollamaConfig') ?? null,
+    litellmConfig: appSettingsStore.get('litellmConfig') ?? null,
     streamingMode: appSettingsStore.get('streamingMode'),
     recentFolders: appSettingsStore.get('recentFolders'),
     autoPathDetection: appSettingsStore.get('autoPathDetection'),
