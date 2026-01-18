@@ -2,7 +2,7 @@
  * Provider and model configuration types for multi-provider support
  */
 
-export type ProviderType = 'anthropic' | 'openai' | 'google' | 'xai' | 'ollama' | 'deepseek' | 'zai' | 'custom' | 'bedrock';
+export type ProviderType = 'anthropic' | 'openai' | 'openrouter' | 'google' | 'xai' | 'ollama' | 'deepseek' | 'zai' | 'custom' | 'bedrock';
 
 export interface ProviderConfig {
   id: ProviderType;
@@ -48,6 +48,24 @@ export interface OllamaConfig {
   lastValidated?: number;
   models?: OllamaModelInfo[];  // Discovered models from Ollama API
   contextLengthOverride?: number;  // User override for context window (applies to all Ollama models)
+}
+
+/**
+ * OpenRouter model info from API
+ */
+export interface OpenRouterModel {
+  id: string;           // e.g., "anthropic/claude-3.5-sonnet"
+  name: string;         // e.g., "Claude 3.5 Sonnet"
+  provider: string;     // e.g., "anthropic" (extracted from id)
+  contextLength: number;
+}
+
+/**
+ * OpenRouter configuration
+ */
+export interface OpenRouterConfig {
+  models: OpenRouterModel[];
+  lastFetched?: number;
 }
 
 /**
