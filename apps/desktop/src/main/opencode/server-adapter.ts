@@ -178,15 +178,26 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
             const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant');
             if (lastAssistantMsg) {
               const sessionModelId = lastAssistantMsg.modelID as string | undefined;
-              const currentModelBase = selectedModel?.model?.split('/').pop()?.split('-ctx')[0];
-              const sessionModelBase = sessionModelId?.split('-ctx')[0];
+              // Extract base model name (e.g., "qwen3:8b" from "qwen3:8b-32k" or "ollama/qwen3:8b-32k")
+              const currentModelRaw = selectedModel?.model?.split('/').pop() || '';
+              // Remove context suffix like "-32k", "-ctx40k" to get base model
+              const currentModelBase = currentModelRaw.replace(/-\d+k$/i, '').replace(/-ctx\d+k$/i, '');
+              const sessionModelBase = sessionModelId?.replace(/-\d+k$/i, '').replace(/-ctx\d+k$/i, '') || '';
 
+              console.log('[OpenCode Server] Model comparison - session:', sessionModelBase, 'current:', currentModelBase);
+              this.emit('debug', { type: 'info', message: `Model comparison - session: ${sessionModelBase}, current: ${currentModelBase}` });
+
+              // Compare the base model family (e.g., "qwen3:8b" vs "qwen2.5:32b")
               if (sessionModelBase && currentModelBase && sessionModelBase !== currentModelBase) {
-                console.log('[OpenCode Server] Model changed from', sessionModelBase, 'to', currentModelBase);
+                console.log('[OpenCode Server] Model CHANGED from', sessionModelBase, 'to', currentModelBase);
                 console.log('[OpenCode Server] Creating NEW session for new model (existing conversation will be preserved separately)');
                 this.emit('debug', { type: 'warning', message: `Model changed: ${sessionModelBase} → ${currentModelBase}. Creating new session.` });
                 shouldCreateNewSession = true;
+              } else {
+                console.log('[OpenCode Server] Model unchanged, will reuse session');
               }
+            } else {
+              console.log('[OpenCode Server] No assistant message found in session history');
             }
           }
 
