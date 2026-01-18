@@ -10,7 +10,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { app } from 'electron';
 import { getOpenCodeCliPath, isOpenCodeBundled } from './cli-path';
 import { getAllApiKeys, getBedrockCredentials } from '../store/secureStorage';
-import { getSelectedModel } from '../store/appSettings';
+import { getSelectedModel, getOllamaConfig } from '../store/appSettings';
 import { generateOpenCodeConfig, syncApiKeysToOpenCodeAuth } from './config-generator';
 import { getExtendedNodePath } from '../utils/system-path';
 import { getBundledNodePaths, logBundledNodeInfo } from '../utils/bundled-node';
@@ -274,8 +274,16 @@ class SharedOpenCodeServer {
     }
 
     const selectedModel = getSelectedModel();
-    if (selectedModel?.provider === 'ollama' && selectedModel.baseUrl) {
-      env.OLLAMA_HOST = selectedModel.baseUrl;
+    if (selectedModel?.provider === 'ollama') {
+      if (selectedModel.baseUrl) {
+        env.OLLAMA_HOST = selectedModel.baseUrl;
+      }
+
+      // Set context length for Ollama as an additional fallback
+      // Priority: user override > model default > fallback (32K)
+      const ollamaConfig = getOllamaConfig();
+      const contextLength = ollamaConfig?.contextLengthOverride ?? 32768;
+      env.OLLAMA_CONTEXT_LENGTH = String(contextLength);
     }
 
     if (process.env.OPENCODE_CONFIG) {

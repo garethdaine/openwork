@@ -104,14 +104,14 @@ const accomplishAPI = {
   // Ollama configuration
   testOllamaConnection: (url: string): Promise<{
     success: boolean;
-    models?: Array<{ id: string; displayName: string; size: number }>;
+    models?: Array<{ id: string; displayName: string; size: number; contextWindow?: number }>;
     error?: string;
   }> => ipcRenderer.invoke('ollama:test-connection', url),
 
-  getOllamaConfig: (): Promise<{ baseUrl: string; enabled: boolean; lastValidated?: number; models?: Array<{ id: string; displayName: string; size: number }> } | null> =>
+  getOllamaConfig: (): Promise<{ baseUrl: string; enabled: boolean; lastValidated?: number; models?: Array<{ id: string; displayName: string; size: number; contextWindow?: number }>; contextLengthOverride?: number } | null> =>
     ipcRenderer.invoke('ollama:get-config'),
 
-  setOllamaConfig: (config: { baseUrl: string; enabled: boolean; lastValidated?: number; models?: Array<{ id: string; displayName: string; size: number }> } | null): Promise<void> =>
+  setOllamaConfig: (config: { baseUrl: string; enabled: boolean; lastValidated?: number; models?: Array<{ id: string; displayName: string; size: number; contextWindow?: number }>; contextLengthOverride?: number } | null): Promise<void> =>
     ipcRenderer.invoke('ollama:set-config', config),
 
   // Bedrock

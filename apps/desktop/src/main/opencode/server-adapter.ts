@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { isOpenCodeBundled, getBundledOpenCodeVersion } from './cli-path';
-import { getSelectedModel } from '../store/appSettings';
+import { getSelectedModel, getOllamaConfig } from '../store/appSettings';
 import { ACCOMPLISH_AGENT_NAME } from './config-generator';
 import { getSharedServer } from './shared-server';
 import type {
@@ -133,6 +133,16 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
     console.log('[OpenCode Server] Shared server ready on port:', this.serverPort);
     this.emit('debug', { type: 'info', message: `Shared server ready on port: ${this.serverPort}` });
 
+    // For Ollama, ensure a model variant with num_ctx baked in exists
+    // This is the only reliable way to set context window when using OpenAI-compatible endpoint
+    let effectiveModelName: string | undefined;
+    if (selectedModel?.provider === 'ollama') {
+      const ollamaModelName = selectedModel.model.split('/').pop() || selectedModel.model;
+      effectiveModelName = await this.ensureOllamaModelWithContext(ollamaModelName, selectedModel.baseUrl);
+      console.log('[OpenCode Server] Using Ollama model:', effectiveModelName);
+      this.emit('debug', { type: 'info', message: `Using Ollama model: ${effectiveModelName}` });
+    }
+
     // Create or reuse session
     // IMPORTANT: For follow-ups, config.sessionId should be provided to maintain context
     if (config.sessionId) {
@@ -164,7 +174,7 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
         } else {
           console.warn('[OpenCode Server] Session not found, creating new one');
           this.emit('debug', { type: 'warning', message: 'Session not found on server, creating new one' });
-          this.currentSessionId = await this.createSession();
+          this.currentSessionId = await this.createSession(effectiveModelName);
         }
       } catch (error) {
         console.warn('[OpenCode Server] Failed to verify session:', error);
@@ -173,7 +183,7 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
     } else {
       console.log('[OpenCode Server] Creating NEW session...');
       this.emit('debug', { type: 'info', message: 'Creating NEW session...' });
-      this.currentSessionId = await this.createSession();
+      this.currentSessionId = await this.createSession(effectiveModelName);
       console.log('[OpenCode Server] NEW session created:', this.currentSessionId);
       this.emit('debug', { type: 'info', message: `NEW session created: ${this.currentSessionId}` });
     }
@@ -203,53 +213,112 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
   }
 
   /**
-   * Preload an Ollama model to ensure it's in memory before creating a session
-   * This works around OpenCode's tendency to use cached/default models
+   * Ensure an Ollama model variant exists with the configured num_ctx baked in.
+   * This creates a custom model using Ollama's /api/create endpoint with a Modelfile
+   * that sets PARAMETER num_ctx to the desired value.
    *
-   * IMPORTANT: We set num_ctx here to override Ollama's default 4096 context window.
-   * Ollama silently truncates conversation history if the context window is too small,
-   * which causes follow-up messages to lose context.
-   * See: https://github.com/sst/opencode/issues/3250
+   * This is the only reliable way to set context window for Ollama models when using
+   * OpenCode's OpenAI-compatible endpoint, which doesn't support num_ctx in requests.
+   *
+   * Returns the name of the model to use (either original or the custom variant).
+   *
+   * See: https://github.com/ollama/ollama/issues/5356
    */
-  private async preloadOllamaModel(modelName: string, baseUrl?: string): Promise<void> {
+  private async ensureOllamaModelWithContext(modelName: string, baseUrl?: string): Promise<string> {
     const ollamaHost = baseUrl || process.env.OLLAMA_HOST || 'http://localhost:11434';
-    // Use 32K context window for Ollama models (default is only 4096)
-    // This is critical for multi-turn conversations to maintain context
-    const numCtx = 32768;
 
-    console.log('[OpenCode Server] Preloading Ollama model:', modelName, 'at', ollamaHost, 'with num_ctx:', numCtx);
-    this.emit('debug', { type: 'info', message: `Preloading Ollama model: ${modelName} with num_ctx: ${numCtx}` });
+    // Determine context window:
+    // 1. User override (if set) takes highest priority
+    // 2. Model's reported context window
+    // 3. Default fallback (32K)
+    const ollamaConfig = getOllamaConfig();
+    const modelInfo = ollamaConfig?.models?.find(m => m.id === modelName);
+    const defaultNumCtx = 32768;
+    const numCtx = ollamaConfig?.contextLengthOverride ?? modelInfo?.contextWindow ?? defaultNumCtx;
+
+    // Create a variant name that includes the context size for clarity
+    // e.g., "qwen3:8b" -> "qwen3:8b-ctx40k" for 40960 context
+    const ctxSuffix = `-ctx${Math.round(numCtx / 1024)}k`;
+    const variantName = `${modelName}${ctxSuffix}`;
+
+    console.log('[OpenCode Server] Ensuring Ollama model variant:', variantName);
+    console.log('[OpenCode Server] Base model:', modelName, 'num_ctx:', numCtx);
+    this.emit('debug', { type: 'info', message: `Ensuring model variant: ${variantName} with num_ctx: ${numCtx}` });
 
     try {
-      // First, try to set the default model in OpenCode's config
-      if (this.serverPort) {
-        try {
-          const configResponse = await fetch(`http://localhost:${this.serverPort}/config`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              provider: 'ollama',
-              model: modelName,
-            }),
-            signal: AbortSignal.timeout(5000),
-          });
-          if (configResponse.ok) {
-            console.log('[OpenCode Server] Config updated with model:', modelName);
-            this.emit('debug', { type: 'info', message: `Config updated: ${modelName}` });
-          }
-        } catch (e) {
-          console.log('[OpenCode Server] Could not update config:', e);
-        }
+      // First check if the variant already exists
+      const showResponse = await fetch(`${ollamaHost}/api/show`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: variantName }),
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (showResponse.ok) {
+        console.log('[OpenCode Server] Model variant already exists:', variantName);
+        this.emit('debug', { type: 'info', message: `Model variant exists: ${variantName}` });
+
+        // Preload the variant to ensure it's in memory
+        await this.preloadModel(variantName, ollamaHost);
+        return variantName;
       }
 
-      // Send a minimal chat request to load the model into memory with a large context window
-      // NOTE: When OpenCode's OpenAI-compatible API makes requests without num_ctx,
-      // Ollama may reload the model with default settings (4096 context).
-      // We use keep_alive to try to keep the model loaded with our settings.
-      // For best results, users should create a custom model with a Modelfile:
-      //   FROM <model-name>
-      //   PARAMETER num_ctx 32768
-      // See: https://github.com/sst/opencode/issues/3250
+      // Create the variant with the Modelfile
+      console.log('[OpenCode Server] Creating model variant:', variantName);
+      this.emit('debug', { type: 'info', message: `Creating model variant: ${variantName}` });
+
+      const modelfile = `FROM ${modelName}\nPARAMETER num_ctx ${numCtx}\n`;
+
+      const createResponse = await fetch(`${ollamaHost}/api/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: variantName,
+          modelfile: modelfile,
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(30000), // 30s timeout for creation
+      });
+
+      if (createResponse.ok) {
+        console.log('[OpenCode Server] Model variant created successfully:', variantName);
+        this.emit('debug', { type: 'info', message: `Model variant created: ${variantName}` });
+
+        // Preload the new variant
+        await this.preloadModel(variantName, ollamaHost);
+        return variantName;
+      } else {
+        const error = await createResponse.text();
+        console.warn('[OpenCode Server] Failed to create model variant:', error);
+        this.emit('debug', { type: 'warning', message: `Failed to create variant: ${error}` });
+
+        // Fall back to original model with preload
+        await this.preloadModel(modelName, ollamaHost, numCtx);
+        return modelName;
+      }
+    } catch (error) {
+      console.warn('[OpenCode Server] Error ensuring model variant:', error);
+      this.emit('debug', { type: 'warning', message: `Error with model variant: ${(error as Error).message}` });
+
+      // Fall back to original model with preload
+      await this.preloadModel(modelName, ollamaHost, numCtx);
+      return modelName;
+    }
+  }
+
+  /**
+   * Preload a model to ensure it's in memory
+   */
+  private async preloadModel(modelName: string, ollamaHost: string, numCtx?: number): Promise<void> {
+    console.log('[OpenCode Server] Preloading model:', modelName);
+    this.emit('debug', { type: 'info', message: `Preloading model: ${modelName}` });
+
+    try {
+      const options: Record<string, unknown> = { num_predict: 1 };
+      if (numCtx) {
+        options.num_ctx = numCtx;
+      }
+
       const response = await fetch(`${ollamaHost}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -257,34 +326,27 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
           model: modelName,
           messages: [{ role: 'user', content: 'hi' }],
           stream: false,
-          keep_alive: '30m', // Keep model loaded for 30 minutes
-          options: {
-            num_predict: 1,  // Generate minimal response (just for preload)
-            num_ctx: numCtx, // Set large context window
-          },
+          keep_alive: '30m',
+          options,
         }),
-        signal: AbortSignal.timeout(60000), // 60s timeout for model loading
+        signal: AbortSignal.timeout(60000),
       });
 
       if (response.ok) {
-        console.log('[OpenCode Server] Model preloaded successfully with num_ctx:', numCtx);
-        this.emit('debug', { type: 'info', message: `Model preloaded with num_ctx: ${numCtx}` });
-      } else {
-        const error = await response.text();
-        console.warn('[OpenCode Server] Model preload warning:', error);
-        this.emit('debug', { type: 'warning', message: `Model preload issue: ${error}` });
+        console.log('[OpenCode Server] Model preloaded successfully');
+        this.emit('debug', { type: 'info', message: 'Model preloaded' });
       }
     } catch (error) {
       console.warn('[OpenCode Server] Model preload failed:', error);
-      this.emit('debug', { type: 'warning', message: `Model preload failed: ${(error as Error).message}` });
-      // Don't throw - continue anyway, OpenCode might still work
     }
   }
 
   /**
    * Create a new session
+   * @param ollamaModelOverride - For Ollama, use this model name instead of the one from settings
+   *                              (used for custom variants with num_ctx baked in)
    */
-  private async createSession(): Promise<string> {
+  private async createSession(ollamaModelOverride?: string): Promise<string> {
     const selectedModel = getSelectedModel();
     console.log('[OpenCode Server] Selected model from settings:', JSON.stringify(selectedModel));
     this.emit('debug', { type: 'info', message: `Selected model: ${JSON.stringify(selectedModel)}` });
@@ -297,12 +359,12 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
       console.log('[OpenCode Server] Raw model from settings:', modelId);
       console.log('[OpenCode Server] Provider:', selectedModel.provider);
 
-      // For Ollama, preload the model first to ensure it's in memory
+      // Format model ID for the provider
       if (selectedModel.provider === 'ollama') {
-        const ollamaModelName = selectedModel.model.split('/').pop() || selectedModel.model;
-        await this.preloadOllamaModel(ollamaModelName, selectedModel.baseUrl);
+        // Use the override if provided (custom variant with num_ctx), otherwise use original
+        const ollamaModelName = ollamaModelOverride || selectedModel.model.split('/').pop() || selectedModel.model;
         modelId = `ollama/${ollamaModelName}`;
-        console.log('[OpenCode Server] Ollama model ID:', modelId);
+        console.log('[OpenCode Server] Ollama model ID:', modelId, ollamaModelOverride ? '(custom variant)' : '');
       } else if (selectedModel.provider === 'zai') {
         const id = selectedModel.model.split('/').pop() || selectedModel.model;
         modelId = `zai-coding-plan/${id}`;

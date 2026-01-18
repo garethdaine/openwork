@@ -36,6 +36,7 @@ export interface OllamaModelInfo {
   id: string;        // e.g., "qwen3:latest"
   displayName: string;
   size: number;
+  contextWindow?: number;  // Max context length from model metadata
 }
 
 /**
@@ -46,6 +47,7 @@ export interface OllamaConfig {
   enabled: boolean;
   lastValidated?: number;
   models?: OllamaModelInfo[];  // Discovered models from Ollama API
+  contextLengthOverride?: number;  // User override for context window (applies to all Ollama models)
 }
 
 /**

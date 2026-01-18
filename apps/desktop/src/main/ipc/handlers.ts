@@ -85,6 +85,7 @@ interface OllamaModel {
   id: string;
   displayName: string;
   size: number;
+  contextWindow?: number;
 }
 
 /**
@@ -1095,13 +1096,57 @@ export function registerIPCHandlers(): void {
       }
 
       const data = await response.json() as { models?: Array<{ name: string; size: number }> };
-      const models: OllamaModel[] = (data.models || []).map((m) => ({
-        id: m.name,
-        displayName: m.name,
-        size: m.size,
-      }));
+      const basicModels = data.models || [];
+
+      // Fetch context window for each model using /api/show
+      const models: OllamaModel[] = await Promise.all(
+        basicModels.map(async (m) => {
+          let contextWindow: number | undefined;
+
+          try {
+            // Fetch model details to get context_length from model_info
+            const showResponse = await fetchWithTimeout(
+              `${sanitizedUrl}/api/show`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: m.name }),
+              },
+              5000 // 5s timeout per model
+            );
+
+            if (showResponse.ok) {
+              const showData = await showResponse.json() as {
+                model_info?: Record<string, unknown>;
+              };
+
+              // Look for context_length in model_info
+              // Keys are like "llama.context_length" or "gemma3.context_length"
+              if (showData.model_info) {
+                for (const [key, value] of Object.entries(showData.model_info)) {
+                  if (key.endsWith('.context_length') && typeof value === 'number') {
+                    contextWindow = value;
+                    break;
+                  }
+                }
+              }
+            }
+          } catch {
+            // Ignore errors fetching individual model details
+            console.log(`[Ollama] Could not fetch details for model ${m.name}`);
+          }
+
+          return {
+            id: m.name,
+            displayName: m.name,
+            size: m.size,
+            contextWindow,
+          };
+        })
+      );
 
       console.log(`[Ollama] Connection successful, found ${models.length} models`);
+      console.log(`[Ollama] Models with context info:`, models.map(m => `${m.id}: ${m.contextWindow ?? 'unknown'}`));
       return { success: true, models };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed';
@@ -1150,7 +1195,15 @@ export function registerIPCHandlers(): void {
           if (typeof model.id !== 'string' || typeof model.displayName !== 'string' || typeof model.size !== 'number') {
             throw new Error('Invalid Ollama configuration: invalid model format');
           }
+          // contextWindow is optional and should be a number if present
+          if (model.contextWindow !== undefined && typeof model.contextWindow !== 'number') {
+            throw new Error('Invalid Ollama configuration: invalid contextWindow format');
+          }
         }
+      }
+      // Validate optional contextLengthOverride if present
+      if (config.contextLengthOverride !== undefined && typeof config.contextLengthOverride !== 'number') {
+        throw new Error('Invalid Ollama configuration: contextLengthOverride must be a number');
       }
     }
     setOllamaConfig(config);

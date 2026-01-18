@@ -42,7 +42,8 @@
 <div align="left">
 
 - Use your own API key (OpenAI, Anthropic, etc.)
-- Or run with [Ollama](https://ollama.com) (no API key needed)
+- Or run with [Ollama](https://ollama.com) for fully local AI
+- **No API key needed for Ollama** - your data never leaves your machine
 - No subscription, no upsell
 - It's a tool—not a service
 
@@ -109,8 +110,8 @@
 
 | Step | Action | Details |
 |:----:|--------|---------|
-| **1** | **Install the App** |  the DMG and drag it into Applications |
-| **2** | **Connect Your AI** | Use your own OpenAI or Anthropic API key, or Ollama. No subscriptions. |
+| **1** | **Install the App** | Download the DMG and drag it into Applications |
+| **2** | **Connect Your AI** | Use your own OpenAI or Anthropic API key, or [Ollama](docs/ollama-setup.md) for fully local AI |
 | **3** | **Give It Access** | Choose which folders it can see. You stay in control. |
 | **4** | **Start Working** | Ask it to summarize a doc, clean a folder, or create a report. You approve everything. |
 
@@ -185,6 +186,38 @@ That's it.
 |----------|-------------|
 | `CLEAN_START=1` | Clear all stored data on app start |
 | `E2E_SKIP_AUTH=1` | Skip onboarding flow (for testing) |
+
+</details>
+
+<details>
+<summary><strong>Streaming Mode</strong></summary>
+
+The app supports two modes for communicating with the AI:
+
+| Mode | Description |
+|------|-------------|
+| **Streaming (default)** | Real-time token-by-token output via Server-Sent Events |
+| **CLI (legacy)** | Buffered output - responses appear all at once |
+
+Toggle in Settings → "Enable Streaming Mode". Streaming provides a better experience with real-time feedback as the AI generates responses.
+
+</details>
+
+<details>
+<summary><strong>Ollama Support</strong></summary>
+
+Run fully local AI with [Ollama](https://ollama.com):
+
+1. Install Ollama and pull a model: `ollama pull qwen3:8b`
+2. In Settings, enter your Ollama URL and click "Test Connection"
+3. Select your model and start working
+
+**Key features:**
+- Automatic context window detection and configuration
+- Creates optimized model variants with correct context sizes
+- Works with remote Ollama servers
+
+See [docs/ollama-setup.md](docs/ollama-setup.md) for detailed setup instructions.
 
 </details>
 

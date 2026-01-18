@@ -82,8 +82,8 @@ interface AccomplishAPI {
     models?: Array<{ id: string; displayName: string; size: number }>;
     error?: string;
   }>;
-  getOllamaConfig(): Promise<{ baseUrl: string; enabled: boolean; lastValidated?: number; models?: Array<{ id: string; displayName: string; size: number }> } | null>;
-  setOllamaConfig(config: { baseUrl: string; enabled: boolean; lastValidated?: number; models?: Array<{ id: string; displayName: string; size: number }> } | null): Promise<void>;
+  getOllamaConfig(): Promise<{ baseUrl: string; enabled: boolean; lastValidated?: number; models?: Array<{ id: string; displayName: string; size: number; contextWindow?: number }>; contextLengthOverride?: number } | null>;
+  setOllamaConfig(config: { baseUrl: string; enabled: boolean; lastValidated?: number; models?: Array<{ id: string; displayName: string; size: number; contextWindow?: number }>; contextLengthOverride?: number } | null): Promise<void>;
 
   // Bedrock configuration
   validateBedrockCredentials(credentials: string): Promise<{ valid: boolean; error?: string }>;

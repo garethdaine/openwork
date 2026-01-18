@@ -51,12 +51,13 @@ export default function SettingsDialog({ open, onOpenChange, onApiKeySaved }: Se
   const [modelStatusMessage, setModelStatusMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'cloud' | 'local'>('cloud');
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
-  const [ollamaModels, setOllamaModels] = useState<Array<{ id: string; displayName: string; size: number }>>([]);
+  const [ollamaModels, setOllamaModels] = useState<Array<{ id: string; displayName: string; size: number; contextWindow?: number }>>([]);
   const [ollamaConnected, setOllamaConnected] = useState(false);
   const [ollamaError, setOllamaError] = useState<string | null>(null);
   const [testingOllama, setTestingOllama] = useState(false);
   const [selectedOllamaModel, setSelectedOllamaModel] = useState<string>('');
   const [savingOllama, setSavingOllama] = useState(false);
+  const [contextLengthOverride, setContextLengthOverride] = useState<string>('');  // Empty = use model default
   const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
   const [bedrockAuthTab, setBedrockAuthTab] = useState<'accessKeys' | 'profile'>('accessKeys');
   const [bedrockAccessKeyId, setBedrockAccessKeyId] = useState('');
@@ -131,6 +132,10 @@ export default function SettingsDialog({ open, onOpenChange, onApiKeySaved }: Se
         const config = await accomplish.getOllamaConfig();
         if (config) {
           setOllamaUrl(config.baseUrl);
+          // Load context length override if set
+          if (config.contextLengthOverride) {
+            setContextLengthOverride(String(config.contextLengthOverride));
+          }
           // Auto-test connection if previously configured
           if (config.enabled) {
             const result = await accomplish.testOllamaConnection(config.baseUrl);
@@ -307,12 +312,17 @@ export default function SettingsDialog({ open, onOpenChange, onApiKeySaved }: Se
     setSavingOllama(true);
 
     try {
+      // Parse context length override (empty string = undefined = use model default)
+      const parsedOverride = contextLengthOverride.trim() ? parseInt(contextLengthOverride, 10) : undefined;
+      const validOverride = parsedOverride && !isNaN(parsedOverride) && parsedOverride > 0 ? parsedOverride : undefined;
+
       // Save the Ollama config
       await accomplish.setOllamaConfig({
         baseUrl: ollamaUrl,
         enabled: true,
         lastValidated: Date.now(),
         models: ollamaModels,  // Include discovered models
+        contextLengthOverride: validOverride,  // User override for context window
       });
 
       // Set as selected model
@@ -534,9 +544,43 @@ export default function SettingsDialog({ open, onOpenChange, onApiKeySaved }: Se
                         {ollamaModels.map((model) => (
                           <option key={model.id} value={model.id}>
                             {model.displayName} ({formatBytes(model.size)})
+                            {model.contextWindow ? ` - ${(model.contextWindow / 1024).toFixed(0)}K ctx` : ''}
                           </option>
                         ))}
                       </select>
+                      {/* Show selected model's context window */}
+                      {selectedOllamaModel && (() => {
+                        const model = ollamaModels.find(m => m.id === selectedOllamaModel);
+                        return model?.contextWindow ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Max context: {model.contextWindow.toLocaleString()} tokens ({(model.contextWindow / 1024).toFixed(0)}K)
+                          </p>
+                        ) : null;
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Context Length Override (only show when connected) */}
+                  {ollamaConnected && ollamaModels.length > 0 && (
+                    <div className="mb-4">
+                      <label className="mb-2 block text-sm font-medium text-foreground">
+                        Context Length Override
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">(optional)</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={contextLengthOverride}
+                        onChange={(e) => setContextLengthOverride(e.target.value)}
+                        placeholder="Leave empty to use model default"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        min="2048"
+                        max="131072"
+                        step="1024"
+                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Override the context window for all Ollama models. Common values: 4096, 8192, 16384, 32768.
+                        Larger values use more memory.
+                      </p>
                     </div>
                   )}
 

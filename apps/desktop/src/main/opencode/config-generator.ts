@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { PERMISSION_API_PORT } from '../permission-api';
 import { getOllamaConfig, getSelectedModel } from '../store/appSettings';
-import { getApiKey } from '../store/secureStorage';
+import { getApiKey, getAllApiKeys } from '../store/secureStorage';
 import type { BedrockCredentials } from '@accomplish/shared';
 
 /**
@@ -343,6 +343,10 @@ interface McpServerConfig {
 interface OllamaProviderModelConfig {
   name: string;
   tools?: boolean;
+  limit?: {
+    context?: number;
+    output?: number;
+  };
 }
 
 interface OllamaProviderConfig {
@@ -408,6 +412,10 @@ export async function generateOpenCodeConfig(): Promise<string> {
   const providerConfig: Record<string, ProviderConfig> = {};
 
   // Add Ollama provider configuration if enabled
+  // We use '@ai-sdk/openai-compatible' with num_ctx in model options.
+  // OpenCode passes these options to Ollama's OpenAI-compatible endpoint.
+  // The preload in server-adapter.ts also sets num_ctx via native Ollama API as a fallback.
+  // See: https://github.com/ollama/ollama/issues/5356
   if (ollamaConfig?.enabled && ollamaConfig.models && ollamaConfig.models.length > 0) {
     // Known Ollama models that don't support tool/function calling
     const modelsWithoutToolSupport = [
@@ -417,6 +425,13 @@ export async function generateOpenCodeConfig(): Promise<string> {
       'starcoder',
     ];
 
+    // Default context window size for Ollama models (32K is safe for most modern models)
+    // Used when model doesn't report its context window
+    const defaultNumCtx = 32768;
+
+    // User override takes precedence over model-specific and default values
+    const userOverride = ollamaConfig.contextLengthOverride;
+
     const ollamaModels: Record<string, OllamaProviderModelConfig> = {};
     for (const model of ollamaConfig.models) {
       // Only enable tools for models that support it
@@ -425,10 +440,41 @@ export async function generateOpenCodeConfig(): Promise<string> {
       const supportsTools = !modelsWithoutToolSupport.some(
         noToolModel => modelBaseName.includes(noToolModel)
       );
+
+      // Determine context window:
+      // 1. User override (if set) takes highest priority
+      // 2. Model's reported context window (from Ollama API)
+      // 3. Default fallback (32K)
+      const modelContextWindow = model.contextWindow ?? defaultNumCtx;
+      const effectiveNumCtx = userOverride ?? modelContextWindow;
+
+      // Create variant name that includes context size (matches server-adapter.ts)
+      const ctxSuffix = `-ctx${Math.round(effectiveNumCtx / 1024)}k`;
+      const variantName = `${model.id}${ctxSuffix}`;
+
+      // Register both the original model and the variant
+      // The variant is what server-adapter.ts creates with num_ctx baked in
       ollamaModels[model.id] = {
         name: model.displayName,
         tools: supportsTools,
+        limit: {
+          context: effectiveNumCtx,
+          output: 8192,
+        },
       };
+
+      // Also register the variant so OpenCode recognizes it
+      ollamaModels[variantName] = {
+        name: `${model.displayName} (${Math.round(effectiveNumCtx / 1024)}K ctx)`,
+        tools: supportsTools,
+        limit: {
+          context: effectiveNumCtx,
+          output: 8192,
+        },
+      };
+
+      console.log(`[OpenCode Config] Model ${model.id}: contextWindow=${model.contextWindow ?? 'unknown'}, effectiveNumCtx=${effectiveNumCtx}${userOverride ? ' (user override)' : ''}`);
+      console.log(`[OpenCode Config] Variant ${variantName} registered`);
     }
 
     providerConfig.ollama = {
@@ -440,7 +486,9 @@ export async function generateOpenCodeConfig(): Promise<string> {
       models: ollamaModels,
     };
 
-    console.log('[OpenCode Config] Ollama provider configured with models:', Object.keys(ollamaModels));
+    console.log('[OpenCode Config] Ollama provider configured');
+    console.log('[OpenCode Config] User context override:', userOverride ?? 'none (using model defaults)');
+    console.log('[OpenCode Config] Ollama models:', Object.keys(ollamaModels));
   }
 
   // Add Bedrock provider configuration if credentials are stored
@@ -558,7 +606,6 @@ export function getOpenCodeAuthPath(): string {
  * This allows OpenCode CLI to recognize DeepSeek and Z.AI providers
  */
 export async function syncApiKeysToOpenCodeAuth(): Promise<void> {
-  const { getAllApiKeys } = await import('../store/secureStorage');
   const apiKeys = await getAllApiKeys();
 
   const authPath = getOpenCodeAuthPath();
