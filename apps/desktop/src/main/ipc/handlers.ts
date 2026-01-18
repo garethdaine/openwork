@@ -1521,7 +1521,9 @@ function toTaskMessage(message: OpenCodeMessage): TaskMessage | null {
   if (message.type === 'text') {
     if (message.part.text) {
       return {
-        id: createMessageId(),
+        // Use the message ID from the part if available (for deduplication with streaming)
+        // Fall back to generated ID for backward compatibility
+        id: message.part.id || message.part.messageID || createMessageId(),
         type: 'assistant',
         content: message.part.text,
         timestamp: new Date().toISOString(),
