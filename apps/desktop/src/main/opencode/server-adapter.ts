@@ -263,18 +263,20 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
         return variantName;
       }
 
-      // Create the variant with the Modelfile
+      // Create the variant using the 'from' and 'parameters' approach
+      // This is more reliable than modelfile for simple parameter overrides
       console.log('[OpenCode Server] Creating model variant:', variantName);
       this.emit('debug', { type: 'info', message: `Creating model variant: ${variantName}` });
-
-      const modelfile = `FROM ${modelName}\nPARAMETER num_ctx ${numCtx}\n`;
 
       const createResponse = await fetch(`${ollamaHost}/api/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: variantName,
-          modelfile: modelfile,
+          from: modelName,
+          parameters: {
+            num_ctx: numCtx,
+          },
           stream: false,
         }),
         signal: AbortSignal.timeout(30000), // 30s timeout for creation

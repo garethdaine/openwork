@@ -503,7 +503,6 @@ export async function generateOpenCodeConfig(): Promise<string> {
   const openrouterKey = getApiKey('openrouter');
   if (openrouterKey) {
     // Get the selected model to configure OpenRouter
-    const { getSelectedModel } = await import('../store/appSettings');
     const selectedModel = getSelectedModel();
 
     const openrouterModels: Record<string, OpenRouterProviderModelConfig> = {};
