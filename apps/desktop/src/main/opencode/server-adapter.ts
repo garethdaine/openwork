@@ -145,12 +145,14 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
 
     // Create or reuse session
     // IMPORTANT: For follow-ups, config.sessionId should be provided to maintain context
-    if (config.sessionId) {
-      console.log('[OpenCode Server] REUSING existing session:', config.sessionId);
-      this.emit('debug', { type: 'info', message: `REUSING existing session: ${config.sessionId}` });
-      this.currentSessionId = config.sessionId;
+    // However, if the model has changed, we need to create a new session
+    let shouldCreateNewSession = !config.sessionId;
 
-      // Verify the session exists and log its current state
+    if (config.sessionId) {
+      console.log('[OpenCode Server] Checking existing session:', config.sessionId);
+      this.emit('debug', { type: 'info', message: `Checking existing session: ${config.sessionId}` });
+
+      // Verify the session exists and check if the model matches
       try {
         const sessionResponse = await fetch(
           `http://localhost:${this.serverPort}/session/${config.sessionId}`,
@@ -161,26 +163,51 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
           console.log('[OpenCode Server] Session verified, keys:', Object.keys(sessionData));
           this.emit('debug', { type: 'info', message: `Session verified: ${JSON.stringify(sessionData).substring(0, 200)}` });
 
-          // Also fetch messages to see what context exists
+          // Check if the session was created with a different model
+          // Sessions in OpenCode are tied to their model and can't switch mid-conversation
           const messagesResponse = await fetch(
             `http://localhost:${this.serverPort}/session/${config.sessionId}/message`,
             { method: 'GET', headers: { 'Accept': 'application/json' } }
           );
           if (messagesResponse.ok) {
-            const messages = await messagesResponse.json() as unknown[];
+            const messages = await messagesResponse.json() as Array<Record<string, unknown>>;
             console.log('[OpenCode Server] Session has', messages.length, 'messages in history');
             this.emit('debug', { type: 'info', message: `Session has ${messages.length} messages in history` });
+
+            // Check the model used in the last assistant message
+            const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant');
+            if (lastAssistantMsg) {
+              const sessionModelId = lastAssistantMsg.modelID as string | undefined;
+              const currentModelBase = selectedModel?.model?.split('/').pop()?.split('-ctx')[0];
+              const sessionModelBase = sessionModelId?.split('-ctx')[0];
+
+              if (sessionModelBase && currentModelBase && sessionModelBase !== currentModelBase) {
+                console.log('[OpenCode Server] Model changed from', sessionModelBase, 'to', currentModelBase);
+                console.log('[OpenCode Server] Creating NEW session for new model (existing conversation will be preserved separately)');
+                this.emit('debug', { type: 'warning', message: `Model changed: ${sessionModelBase} → ${currentModelBase}. Creating new session.` });
+                shouldCreateNewSession = true;
+              }
+            }
+          }
+
+          if (!shouldCreateNewSession) {
+            console.log('[OpenCode Server] REUSING existing session:', config.sessionId);
+            this.emit('debug', { type: 'info', message: `REUSING existing session: ${config.sessionId}` });
+            this.currentSessionId = config.sessionId;
           }
         } else {
           console.warn('[OpenCode Server] Session not found, creating new one');
           this.emit('debug', { type: 'warning', message: 'Session not found on server, creating new one' });
-          this.currentSessionId = await this.createSession(effectiveModelName);
+          shouldCreateNewSession = true;
         }
       } catch (error) {
         console.warn('[OpenCode Server] Failed to verify session:', error);
         this.emit('debug', { type: 'warning', message: `Failed to verify session: ${(error as Error).message}` });
+        shouldCreateNewSession = true;
       }
-    } else {
+    }
+
+    if (shouldCreateNewSession) {
       console.log('[OpenCode Server] Creating NEW session...');
       this.emit('debug', { type: 'info', message: 'Creating NEW session...' });
       this.currentSessionId = await this.createSession(effectiveModelName);
