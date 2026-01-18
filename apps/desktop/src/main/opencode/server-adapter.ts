@@ -613,13 +613,19 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
       case 'tool':
         const toolName = (part.tool || part.name || 'unknown') as string;
         const toolState = part.state as Record<string, unknown> | undefined;
+        const toolInput = toolState?.input;
 
         console.log('[OpenCode Server] Tool:', toolName, 'status:', toolState?.status);
-        this.emit('tool-use', toolName, toolState?.input);
+        this.emit('tool-use', toolName, toolInput);
         this.emit('progress', { stage: 'tool-use', message: `Using ${toolName}` });
 
         if (toolState?.status === 'completed' || toolState?.status === 'error') {
           this.emit('tool-result', (toolState?.output || '') as string);
+        }
+
+        // Handle AskUserQuestion (requires user input)
+        if (toolName === 'AskUserQuestion') {
+          this.handleAskUserQuestion(toolInput as AskUserQuestionInput);
         }
         break;
     }
