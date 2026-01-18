@@ -823,6 +823,9 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
     }
   }
 
+  // Track which messages are from the assistant (vs user)
+  private assistantMessageIds: Set<string> = new Set();
+
   /**
    * Handle message.updated event
    * Event structure: { type, properties: { info: { id, role, ... } } }
@@ -839,6 +842,7 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
 
     if (role === 'assistant') {
       this.currentMessageId = messageId;
+      this.assistantMessageIds.add(messageId);
     }
   }
 
@@ -860,6 +864,11 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
 
     switch (partType) {
       case 'text-start':
+        // Only start streaming for assistant messages
+        if (!this.assistantMessageIds.has(messageId)) {
+          console.log('[OpenCode Server] Ignoring text-start for non-assistant message:', messageId);
+          break;
+        }
         // Start of text streaming
         this.streamingMessageId = messageId;
         this.streamingText = '';
@@ -867,6 +876,11 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
         break;
 
       case 'text-delta':
+        // Only process text deltas for assistant messages
+        if (!this.assistantMessageIds.has(messageId)) {
+          console.log('[OpenCode Server] Ignoring text-delta for non-assistant message:', messageId);
+          break;
+        }
         // Incremental text chunk
         const deltaText = (part.text || part.delta || '') as string;
 
@@ -887,6 +901,11 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
         break;
 
       case 'text':
+        // Only process text for assistant messages (avoid echoing user messages)
+        if (!this.assistantMessageIds.has(messageId)) {
+          console.log('[OpenCode Server] Ignoring text for non-assistant message:', messageId);
+          break;
+        }
         // Text update - contains the current full text content (accumulated)
         // This is NOT a delta - it's the complete text at this point in time
         const fullText = (part.text || '') as string;
@@ -1138,6 +1157,7 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
     this.hasCompleted = true;
     this.streamingMessageId = null;
     this.streamingText = '';
+    this.assistantMessageIds.clear();
 
     this.removeAllListeners();
     console.log('[OpenCode Server] Adapter disposed (shared server kept alive for session continuity)');
