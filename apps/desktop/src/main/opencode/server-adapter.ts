@@ -846,9 +846,26 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
         this.emit('debug', { type: 'info', message: `Session status: ${statusType}` });
 
         if (statusType === 'idle') {
-          console.log('[OpenCode Server] Session is idle, completing...');
+          console.log('[OpenCode Server] Session is idle, completing task...');
+          this.emit('debug', { type: 'info', message: 'Session idle - completing task' });
+          
+          // Check if we have any streamed content to finalize
+          console.log('[OpenCode Server] Streaming state - messageId:', this.streamingMessageId, 'textLen:', this.streamingText?.length || 0);
+          this.emit('debug', { type: 'info', message: `Streaming: ${this.streamingMessageId ? 'active' : 'none'}, text: ${this.streamingText?.length || 0} chars` });
+          
+          // If we didn't receive any streaming content, try to fetch it from the session
+          if (!this.streamingText && this.currentSessionId) {
+            console.log('[OpenCode Server] No streaming content received, fetching from session...');
+            this.emit('debug', { type: 'info', message: 'No streaming content - fetching from session' });
+            void this.fetchFinalMessageContent();
+          }
+          
           this.finalizeStreaming();
           this.hasCompleted = true;
+          
+          console.log('[OpenCode Server] Emitting complete event');
+          this.emit('debug', { type: 'info', message: 'Emitting complete event' });
+          
           this.emit('complete', {
             status: 'success',
             sessionId: this.currentSessionId || undefined,
@@ -1123,6 +1140,78 @@ export class OpenCodeServerAdapter extends EventEmitter<OpenCodeServerAdapterEve
 
     this.streamingMessageId = null;
     this.streamingText = '';
+  }
+
+  /**
+   * Fetch the final message content from the session when streaming didn't provide it
+   * This happens when the model responds with tool calls or when SSE events are missed
+   */
+  private async fetchFinalMessageContent(): Promise<void> {
+    if (!this.serverPort || !this.currentSessionId) return;
+
+    try {
+      // Fetch messages for the session
+      const response = await fetch(
+        `http://localhost:${this.serverPort}/session/${this.currentSessionId}/message`,
+        {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(5000),
+        }
+      );
+
+      if (!response.ok) {
+        console.error('[OpenCode Server] Failed to fetch messages:', response.status);
+        return;
+      }
+
+      const messages = await response.json() as Array<{ info: Record<string, unknown>; parts: Array<Record<string, unknown>> }>;
+      
+      // Find the last assistant message
+      const lastAssistantMsg = [...messages].reverse().find(m => m.info?.role === 'assistant');
+      if (!lastAssistantMsg) {
+        console.log('[OpenCode Server] No assistant message found in session');
+        return;
+      }
+
+      const msgId = lastAssistantMsg.info.id as string;
+      const parts = lastAssistantMsg.parts || [];
+      
+      // Extract text content
+      const textParts = parts.filter(p => p.type === 'text');
+      const textContent = textParts.map(p => (p.text || '') as string).join('');
+      
+      // Extract tool calls
+      const toolParts = parts.filter(p => p.type === 'tool');
+      
+      console.log('[OpenCode Server] Fetched message:', msgId, 'text:', textContent.length, 'chars, tools:', toolParts.length);
+      this.emit('debug', { type: 'info', message: `Fetched: ${textContent.length} chars, ${toolParts.length} tools` });
+
+      // If there's text content we didn't receive via streaming, emit it now
+      if (textContent && !this.streamingText) {
+        this.streamingMessageId = msgId;
+        this.streamingText = textContent;
+        this.assistantMessageIds.add(msgId);
+        console.log('[OpenCode Server] Recovered text content:', textContent.substring(0, 100) + '...');
+        this.emit('debug', { type: 'info', message: `Recovered text: ${textContent.substring(0, 50)}...` });
+      }
+
+      // Process any tool calls we might have missed
+      for (const toolPart of toolParts) {
+        const toolName = (toolPart.tool || toolPart.name || 'unknown') as string;
+        const toolState = toolPart.state as Record<string, unknown> | undefined;
+        const toolStatus = toolState?.status as string;
+        
+        // Only emit for tools that are complete
+        if (toolStatus === 'completed' || toolStatus === 'error') {
+          console.log('[OpenCode Server] Processing completed tool:', toolName);
+          this.emit('tool-use', toolName, toolState?.input);
+          this.emit('tool-result', (toolState?.output || '') as string);
+        }
+      }
+    } catch (error) {
+      console.error('[OpenCode Server] Error fetching final message:', error);
+    }
   }
 
   /**
